@@ -11,6 +11,7 @@
 #include "TGraph.h"
 #include "TGAxis.h"
 #include "TROOT.h"
+#include "CMS_lumi.C"
 
 Double_t langaufun(Double_t *x, Double_t *par) {
     
@@ -138,7 +139,7 @@ void settdrStyle() {
   // tdrStyle->SetStatY(Float_t y = 0);
   
   // Margins:
-  tdrStyle->SetPadTopMargin(0.05);
+  tdrStyle->SetPadTopMargin(0.06);
   tdrStyle->SetPadBottomMargin(0.18);
   tdrStyle->SetPadLeftMargin(0.20);
   tdrStyle->SetPadRightMargin(0.02);
@@ -277,9 +278,8 @@ void DrawSOverNHisto(TCanvas *& c, TH1* h, int run, string subdet, bool thin=tru
   fit->SetLineColor(kRed);
   fit->Draw("same");
   
-  TPaveText *text = new TPaveText(0.41, 0.63, 0.80, 0.9, "NDC");
-  text->AddText("CMS Preliminary");
-  text->AddText("\n");
+  TPaveText *text = new TPaveText(0.45, 0.55, 0.70, 0.75, "NDC");
+  //text->AddText("CMS Preliminary");
   if(run==251883) text->AddText("2015 Data, 50ns");
   if(run==258749) text->AddText("2015 Data, 25ns");
   if(run==260627) text->AddText("2015 Data, 25ns");
@@ -287,7 +287,8 @@ void DrawSOverNHisto(TCanvas *& c, TH1* h, int run, string subdet, bool thin=tru
   if(run==273450) text->AddText("2016 Data");
   if(run==278770) text->AddText("2016 Data - old APV setting");
   if(run==278803) text->AddText("2016 Data - new APV setting");
-  if(run==283407) text->AddText("2016 Data - new APV setting");
+  if(run==283407) text->AddText("2016 Data"); 
+  //text->AddText("\n");
   text->AddText("#LTinst. lumi.#GT: 1.5#times10^{34} cm^{-2}s^{-1}");
   //text->AddText(Form("%s MPV: %.2f #pm %.3f", subdet.c_str(), mpv, mpv_err));
   if(subdet=="TEC")
@@ -296,8 +297,9 @@ void DrawSOverNHisto(TCanvas *& c, TH1* h, int run, string subdet, bool thin=tru
       else text->AddText(Form("%s thick MPV: %.1f", subdet.c_str(), mpv));
     }
   else text->AddText(Form("%s MPV: %.1f", subdet.c_str(), mpv));
+  text->SetTextFont(42);
   text->SetTextAlign(12);
-  text->SetTextSize(0.037);
+  text->SetTextSize(0.04);
   //text->SetMargin(0.01);
   //text->SetY1NDC(0.5);
   //text->SetY2NDC(0.75);
@@ -311,6 +313,12 @@ void Plot(TCanvas *c, TFile* f, int run, string subdet="TIB", bool thin=true)
 {
   TH1* h=0;
   
+  writeExtraText = true;       // if extra text
+  extraText  = "Preliminary";  // default extra text is "Preliminary"
+  lumi_8TeV  = "19.1 fb^{-1}"; // default is "19.7 fb^{-1}"
+  lumi_7TeV  = "4.9 fb^{-1}";  // default is "5.1 fb^{-1}"
+  lumi_sqrtS = "13 TeV";       // used with iPeriod = 0, e.g. for simulation-only plots (default is an empty string)
+
   // For TEC differentiate sensors thicknesses and merge sides
   string sides[2];
   sides[0]="MINUS";
@@ -468,11 +476,11 @@ void Plots_SOverN_New(string file="DQM_V0001_R000278803__ZeroBias__Run2016F-Prom
   TCanvas *c = new TCanvas();
   TFile *f = new TFile(file.c_str(), "read");
   if(!f) return;
-  
   Plot(c, f, run, "TIB");
   c->Modified();
   c->Update();
   getchar();
+  CMS_lumi(c,0,33);
   c->Print(Form("TIB_SOverN_run%i%s.png", run, suffix.c_str()));
   c->Print(Form("TIB_SOverN_run%i%s.pdf", run, suffix.c_str()));
 
@@ -480,6 +488,7 @@ void Plots_SOverN_New(string file="DQM_V0001_R000278803__ZeroBias__Run2016F-Prom
   c->Modified();
   c->Update();
   getchar();
+  CMS_lumi(c,0,33);
   c->Print(Form("TOB_SOverN_run%i%s.png", run, suffix.c_str()));
   c->Print(Form("TOB_SOverN_run%i%s.pdf", run, suffix.c_str()));
 
@@ -487,6 +496,7 @@ void Plots_SOverN_New(string file="DQM_V0001_R000278803__ZeroBias__Run2016F-Prom
   c->Modified();
   c->Update();
   getchar();
+  CMS_lumi(c,0,33);
   c->Print(Form("TID_SOverN_run%i%s.png", run, suffix.c_str()));
   c->Print(Form("TID_SOverN_run%i%s.pdf", run, suffix.c_str()));
   
@@ -494,6 +504,7 @@ void Plots_SOverN_New(string file="DQM_V0001_R000278803__ZeroBias__Run2016F-Prom
   c->Modified();
   c->Update();
   getchar();
+  CMS_lumi(c,0,33);
   c->Print(Form("TECthin_SOverN_run%i%s.png", run, suffix.c_str()));
   c->Print(Form("TECthin_SOverN_run%i%s.pdf", run, suffix.c_str()));
 
@@ -501,6 +512,7 @@ void Plots_SOverN_New(string file="DQM_V0001_R000278803__ZeroBias__Run2016F-Prom
   c->Modified();
   c->Update();
   getchar();
+  CMS_lumi(c,0,33);
   c->Print(Form("TECthick_SOverN_run%i%s.png", run, suffix.c_str()));
   c->Print(Form("TECthick_SOverN_run%i%s.pdf", run, suffix.c_str()));
       
