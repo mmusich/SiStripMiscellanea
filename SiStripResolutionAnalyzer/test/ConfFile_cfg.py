@@ -245,6 +245,12 @@ process.load("Configuration.StandardSequences.GeometryDB_cff")
 
 process.offlineBeamSpot = cms.EDProducer("BeamSpotProducer")
 
+#process.load("DPGAnalysis.SiStripTools.MessageLogger_cff")
+
+process.load("FWCore.MessageService.MessageLogger_cfi")
+process.MessageLogger.destinations = ['cout', 'cerr']
+process.MessageLogger.cerr.FwkReport.reportEvery = 100
+
 process.load("DPGAnalysis.SiStripTools.tkAlTrackRefitSequence_cff")
 process.refittedTracks.src = cms.InputTag("ALCARECOSiStripCalMinBias")
 process.refittedTracks.NavigationSchool = cms.string('')
