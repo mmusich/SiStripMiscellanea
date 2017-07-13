@@ -255,7 +255,8 @@ process.refittedATSTracks.NavigationSchool = cms.string('')
 # The module
 ###################################################################
 process.demo = cms.EDAnalyzer('SiStripResolutionAnalyzer',
-                              trajTrackAssoCollection = cms.InputTag("refittedTracks")
+                              trajectoryInput = cms.string("refittedTracks"),
+                              Tracks = cms.InputTag("refittedTracks")
                               )
 
 ###################################################################
