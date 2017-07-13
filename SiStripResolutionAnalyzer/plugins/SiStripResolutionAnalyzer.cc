@@ -48,6 +48,7 @@
 #include "DataFormats/TrackReco/interface/TrackFwd.h"
 #include "CommonTools/UtilAlgos/interface/DetIdSelector.h"
 #include "DataFormats/TrackerRecHit2D/interface/SiPixelRecHit.h"
+#include "CommonTools/Statistics/interface/ChiSquaredProbability.h"
 
 #include "TH1F.h"
 //
@@ -76,6 +77,8 @@ class SiStripResolutionAnalyzer : public edm::one::EDAnalyzer<edm::one::SharedRe
       // ----------member data ---------------------------
       TH1F* m_ptrk;
       TH1F* m_etatrk;
+      TH1F* m_nhits;
+      TH1F* m_chi2Prob;
 
       edm::EDGetTokenT<TrajTrackAssociationCollection> m_ttacollToken;
 };
@@ -98,9 +101,10 @@ SiStripResolutionAnalyzer::SiStripResolutionAnalyzer(const edm::ParameterSet& iC
    usesResource("TFileService");
    edm::Service<TFileService> tfserv;
 
-   m_ptrk = tfserv->make<TH1F>("trkmomentum","Refitted Track  momentum",100,0.,200.);
-   m_etatrk = tfserv->make<TH1F>("trketa","Refitted Track pseudorapidity",100,-4.,4.);
-
+   m_ptrk     = tfserv->make<TH1F>("trkmomentum","Refitted Track  momentum",100,0.,200.);
+   m_etatrk   = tfserv->make<TH1F>("trketa","Refitted Track pseudorapidity",100,-4.,4.);
+   m_nhits    = tfserv->make<TH1F>("trknhits","n. hits",30,0,30);
+   m_chi2Prob = tfserv->make<TH1F>("chi2Prob","chi^{2} probability",50,0.,1.);
 }
 
 
@@ -137,9 +141,17 @@ SiStripResolutionAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSet
     const edm::Ref<std::vector<Trajectory> > & traj = pair->key;
     const reco::TrackRef & trk = pair->val;
     const std::vector<TrajectoryMeasurement> & tmcoll = traj->measurements();
-    
+        
+    double ProbChi2 = ChiSquaredProbability((double)( traj->chiSquared() ),(double)( traj->ndof(false) ));
+
+    if (traj->foundHits() < 6 ) continue;
+    if (ProbChi2 < 0.001 ) continue;
+    if (trk->p()<3.) continue;
+
     m_ptrk->Fill(trk->p());
     m_etatrk->Fill(trk->eta());
+    m_nhits->Fill(traj->foundHits());
+    m_chi2Prob->Fill(ProbChi2);
 
     for(std::vector<TrajectoryMeasurement>::const_iterator measurement = tmcoll.begin() ; measurement!= tmcoll.end() ; ++measurement) {
       

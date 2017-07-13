@@ -6,4 +6,5 @@
 <use name="TrackingTools/TrackFitters"/>
 <use name="DataFormats/TrackReco"/>
 <use name="CommonTools/UtilAlgos"/>
+<use name="CommonTools/Statistics"/>
 <flags EDM_PLUGIN="1"/>
