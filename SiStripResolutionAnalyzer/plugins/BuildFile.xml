@@ -1,13 +1,2 @@
-<use name="FWCore/Framework"/>
-<use name="FWCore/PluginManager"/>
-<use name="FWCore/ParameterSet"/>
-<use name="Alignment/OfflineValidation"/>
-<use name="Alignment/TrckerAlignment"/>
-<use name="DataFormats/GeometrySurface"/>
-<use name="TrackingTools/PatternTools"/>
-<use name="TrackingTools/TrajectoryState"/>
-<use name="TrackingTools/TrackFitters"/>
-<use name="DataFormats/TrackReco"/>
-<use name="CommonTools/UtilAlgos"/>
-<use name="CommonTools/Statistics"/>
+<use   name="SiStripMiscellanea/SiStripResolutionAnalyzer"/>
 <flags EDM_PLUGIN="1"/>

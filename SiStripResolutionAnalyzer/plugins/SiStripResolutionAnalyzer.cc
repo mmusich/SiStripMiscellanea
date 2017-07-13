@@ -30,6 +30,9 @@
 #include "CondFormats/Alignment/interface/Definitions.h"
 #include "DataFormats/Common/interface/Ref.h"
 #include "DataFormats/DetId/interface/DetId.h"
+#include "DataFormats/TrackerCommon/interface/TrackerTopology.h"
+#include "Geometry/Records/interface/TrackerDigiGeometryRecord.h"
+#include "Geometry/Records/interface/TrackerTopologyRcd.h"
 #include "Geometry/CommonTopologies/interface/RadialStripTopology.h"
 #include "Geometry/CommonDetUnit/interface/GeomDet.h"
 #include "Geometry/CommonDetUnit/interface/GeomDetType.h"
@@ -60,8 +63,9 @@
 #include "TrackingTools/TrajectoryState/interface/TrajectoryStateOnSurface.h"
 #include "TrackingTools/TransientTrackingRecHit/interface/TransientTrackingRecHit.h"
 
-#include "TMath.h"
+#include "SiStripMiscellanea/SiStripResolutionAnalyzer/interface/SiStripResolutionHelper.h"
 
+#include "TMath.h"
 #include "TH1F.h"
 //
 // class declaration
@@ -146,6 +150,12 @@ SiStripResolutionAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSet
     iSetup.get<IdealMagneticFieldRecord>().get(magneticField);
   */  
 
+  // retrieve tracker topology from geometry
+  edm::ESHandle<TrackerTopology> tTopoHandle;
+  iSetup.get<TrackerTopologyRcd>().get(tTopoHandle);
+  const TrackerTopology* tTopo = tTopoHandle.product();
+   
+  // get the tracks
   edm::Handle<reco::TrackCollection> tracksH;
   iEvent.getByToken(tracksToken_, tracksH);
 
@@ -182,6 +192,18 @@ SiStripResolutionAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSet
 
     fillHitQuantities(traj,vhits_biased,true);
     fillHitQuantities(traj,vhits_unbiased,false);
+
+    assert(vhits_biased.size()==vhits_unbiased.size());
+
+    for (auto& it : vhits_biased) {
+      auto id = DetId(it.rawDetId);
+      auto isStrip = id.subdetId() > 2; 
+      if (!isStrip) continue; 
+
+      // auto packedTopo = SiStripResol::typeAndLayerFromDetId(id,tTopo);
+      // std::cout<<" packedTopo =("<< packedTopo.second.first<<","<<packedTopo.second.first<<")"<<std::endl;
+
+    }
   }   
 }
 
