@@ -1,0 +1,14 @@
+# Editor files
+*.swp
+*~
+
+# Python stuff
+*.pyc
+__init__.py
+
+# ROOT stuff
+*.root
+
+# Plots
+*.png
+*.pdf
