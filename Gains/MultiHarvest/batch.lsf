@@ -1,0 +1,14 @@
+#!/bin/bash 
+CMSSW_DIR=$CMSSW_BASE/src/SiStripMiscellanea/Gains/MultiHarvest
+OUT_DIR=$CMSSW_DIR/out
+LOG_DIR=$CMSSW_DIR/log
+LXBATCH_DIR=`pwd`  
+cd $CMSSW_DIR
+eval `scram runtime -sh`
+cd $LXBATCH_DIR 
+cp -pr $CMSSW_DIR/step_SiStripGainsAAG_ALCAHARVEST.py .
+cmsRun step_SiStripGainsAAG_ALCAHARVEST.py >& harvestJobLog.out
+ls -lh . 
+for payloadOutput in $(ls *db ); do cp $payloadOutput $OUT_DIR/multi_run_harvest_gain.db ; done 
+for RootOutputFile in $(ls *root ); do xrdcp -f $RootOutputFile root://eoscms//eos/cms/store/group/alca_trackeralign/musich/test_out/MultiRunHarvesting ; done 
+for logOutput in $(ls *out ); do cp $logOutput $LOG_DIR; done 
