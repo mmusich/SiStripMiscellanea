@@ -21,7 +21,8 @@ process.maxEvents = cms.untracked.PSet(
     input = cms.untracked.int32(-1)
 )
 
-process.load('SiStripMiscellanea.Gains.InputFiles_cff')
+process.load('SiStripMiscellanea.Gains.InputFiles2_cff')
+process.source.processingMode = cms.untracked.string('RunsAndLumis')
 
 # Input source
 # process.source = cms.Source("PoolSource",
@@ -51,6 +52,12 @@ process.PoolDBOutputService.toPut.append(process.ALCAHARVESTSiStripGainsAAG_dbOu
 process.pclMetadataWriter.recordsToMap.append(process.ALCAHARVESTSiStripGainsAAG_metadata)
 from Configuration.AlCa.GlobalTag import GlobalTag
 process.GlobalTag = GlobalTag(process.GlobalTag, '92X_dataRun2_Express_v4', '')
+
+#### MULTI-RUN HARVESTING SETTINGS
+process.DQMStore.collateHistograms = cms.untracked.bool(True)
+process.dqmSaver.saveByRun=cms.untracked.int32(-1)
+process.dqmSaver.saveAtJobEnd=cms.untracked.bool(True)
+process.dqmSaver.forceRunNumber=cms.untracked.int32(999999) 
 
 # Path and EndPath definitions
 process.SiStripGains = cms.Path(process.ALCAHARVESTSiStripGains)
