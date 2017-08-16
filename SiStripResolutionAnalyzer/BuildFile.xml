@@ -2,7 +2,7 @@
 <use name="FWCore/PluginManager"/>
 <use name="FWCore/ParameterSet"/>
 <use name="Alignment/OfflineValidation"/>
-<use name="Alignment/TrckerAlignment"/>
+<use name="Alignment/TrackerAlignment"/>
 <use name="DataFormats/GeometrySurface"/>
 <use name="TrackingTools/PatternTools"/>
 <use name="TrackingTools/TrajectoryState"/>
