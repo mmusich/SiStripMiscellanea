@@ -35,6 +35,7 @@
 #include "FWCore/ServiceRegistry/interface/Service.h"
 #include "FWCore/Framework/interface/ESHandle.h"
 
+#include "RecoLocalTracker/SiStripClusterizer/interface/SiStripClusterInfo.h"
 #include "TrackingTools/PatternTools/interface/Trajectory.h"
 #include "TrackingTools/PatternTools/interface/TrajTrackAssociation.h"
 #include "DataFormats/TrackerRecHit2D/interface/SiStripRecHit2D.h"
@@ -52,7 +53,6 @@
 #include "FWCore/Framework/interface/ESHandle.h"
 #include "FWCore/Framework/interface/Event.h"
 
-
 #include "DataFormats/GeometrySurface/interface/TrapezoidalPlaneBounds.h"
 #include "DataFormats/GeometrySurface/interface/RectangularPlaneBounds.h"
 
@@ -67,7 +67,6 @@
 #include "Geometry/TrackerNumberingBuilder/interface/GeometricDet.h"
 #include "Geometry/CommonDetUnit/interface/TrackingGeometry.h"
 #include "CalibTracker/SiStripCommon/interface/ShallowGainCalibration.h"
-
 
 #include "DataFormats/FEDRawData/interface/FEDNumbering.h"
 #include "DataFormats/TrackReco/interface/Track.h"
@@ -84,9 +83,65 @@
 #include "CalibFormats/SiStripObjects/interface/SiStripGain.h" 
 #include "CalibTracker/Records/interface/SiStripGainRcd.h"  
 
+#include "DataFormats/TrackerCommon/interface/TrackerTopology.h"
+#include "Geometry/Records/interface/TrackerTopologyRcd.h"
 
 #include "TH1I.h"
 #include "TProfile.h"
+
+// ROOT includes
+#include "TCanvas.h"
+#include "TFile.h"
+#include "TTree.h"
+#include "TChain.h"
+#include "TH1F.h"
+#include "TH2F.h"
+#include "TF1.h"
+#include "TGraphAsymmErrors.h"
+
+// RooFit includes
+#include "RooPlot.h"
+#include "RooRealVar.h"
+#include "RooDataHist.h"
+#include "RooAddPdf.h"
+#include "RooGaussian.h"
+#include "RooLandau.h"
+#include "RooFFTConvPdf.h"
+
+#define HIPDEBUG true
+
+namespace SiStripHelper {
+  
+  enum layer {TIBL1=1,
+	      TIBL2=2,
+	      TIBL3=3,
+	      TIBL4=4,	       
+	      TOBL1=5,
+	      TOBL2=6,
+	      TOBL3=7,
+	      TOBL4=8,
+	      TOBL5=9,
+	      TOBL6=10,
+	      TIDD1=11,
+	      TIDD2=12,
+	      TIDD3=13,
+	      TECD1=14,
+	      TECD2=15,
+	      TECD3=16,
+	      TECD4=17,
+	      TECD5=18,
+	      TECD6=19,
+	      TECD7=20,
+	      TECD8=21,
+	      TECD9=22,
+	      NUM_OF_TYPES=23,
+  };
+
+}
+
+
+TF1 * f2 = NULL;
+TF1 * f3 = NULL;
 
 //
 // class declaration
@@ -112,6 +167,12 @@ class SiStripAnalyzer : public edm::one::EDAnalyzer<edm::one::SharedResources>  
       virtual void endJob() override;
       double thickness(DetId id);
       bool   IsFarFromBorder(TrajectoryStateOnSurface* trajState, const uint32_t detid, const edm::EventSetup* iSetup);
+      int checkLayer( unsigned int iidd, const TrackerTopology* tTopo); 
+      std::string getStringFromEnum(SiStripHelper::layer e);
+      std::string myreplace(const std::string &s,const std::string &toReplace,const std::string &replaceWith);
+      void fitStoN(TH1F *hist);
+      static Double_t function_sum(Double_t *x, Double_t *par);
+      void makeNicePlotStyle(RooPlot* plot);
 
       edm::EDGetTokenT< LumiScalersCollection > scalerToken_; 
       edm::EDGetTokenT< edm::View<reco::Track> > tracks_token_;
@@ -128,6 +189,15 @@ class SiStripAnalyzer : public edm::one::EDAnalyzer<edm::one::SharedResources>  
       double       MaxTrackChiOverNdf;
       int          MaxTrackingIteration;
       bool AllowSaturation;
+
+      bool m_verbose_fit;   
+
+      // cluster analysis
+      bool   applyClusterQuality_;
+      double sToNLowerLimit_;
+      double sToNUpperLimit_;
+      double widthLowerLimit_;
+      double widthUpperLimit_;
 
       int maxLS,maxBx;
       float maxPU,maxLumi;
@@ -148,9 +218,14 @@ class SiStripAnalyzer : public edm::one::EDAnalyzer<edm::one::SharedResources>  
       TProfile* p_nUsedClust_per_LS;
       TProfile* p_nUsedClust_vs_lumi;
 
-
+      TH1F*     h_nClusters;
+      TH1F*     h_nUsedClusters;
       TH1I*     h_events_per_bx; 
       TH1F*     h_CChargeOverPath;
+      TH1F*     h_StoN;
+      TH1F*     h_StoNCorr;
+      std::map<SiStripHelper::layer,TH1F*>  h_StoN_layer;
+      std::map<SiStripHelper::layer,TH1F*>  h_StoNCorr_layer;
 };
 
 //
@@ -183,6 +258,16 @@ SiStripAnalyzer::SiStripAnalyzer(const edm::ParameterSet& iConfig)
    MaxTrackChiOverNdf      = iConfig.getUntrackedParameter<double>  ("MaxTrackChiOverNdf"   ,  3);
    MaxTrackingIteration    = iConfig.getUntrackedParameter<int>     ("MaxTrackingIteration" ,  7);
    AllowSaturation         = iConfig.getUntrackedParameter<bool>    ("AllowSaturation"      , false);
+   m_verbose_fit           = iConfig.getParameter<bool>("verbose_fit");
+
+   // cluster quality conditions
+   edm::ParameterSet cluster_condition = iConfig.getParameter<edm::ParameterSet>("ClusterConditions");
+   applyClusterQuality_ = cluster_condition.getParameter<bool>("On");
+   sToNLowerLimit_      = cluster_condition.getParameter<double>("minStoN");
+   sToNUpperLimit_      = cluster_condition.getParameter<double>("maxStoN");
+   widthLowerLimit_     = cluster_condition.getParameter<double>("minWidth");
+   widthUpperLimit_     = cluster_condition.getParameter<double>("maxWidth");
+
 
    maxLS=-999; 
    maxBx=-999;
@@ -243,6 +328,11 @@ SiStripAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup
   
   //std::cout<<"bx:"<<bx<<" ls:"<<ls<<" instLumi:"<<instLumi_<<" PU:"<<PU_<<std::endl;
   
+  // Get the geometry
+  edm::ESHandle<TrackerTopology> tTopo_handle;
+  iSetup.get<TrackerTopologyRcd>().get(tTopo_handle);
+  const TrackerTopology* tTopo = tTopo_handle.product();
+
   edm::ESHandle<TrackerGeometry> theTrackerGeometry;         iSetup.get<TrackerDigiGeometryRecord>().get( theTrackerGeometry );  
   m_tracker=&(* theTrackerGeometry );
   edm::ESHandle<SiStripGain> gainHandle;                     iSetup.get<SiStripGainRcd>().get(gainHandle);
@@ -260,8 +350,8 @@ SiStripAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup
     float	   trackmomentum    = track->p();                
     float	   trackpt          = track->pt();               
     float	   trackpterr       = track->ptError();          
-    unsigned int  trackhitsvalid   = track->numberOfValidHits();
-    unsigned int  trackhitslost    = track->numberOfLostHits(); 
+    unsigned int   trackhitsvalid   = track->numberOfValidHits();
+    unsigned int   trackhitslost    = track->numberOfLostHits(); 
     double	   tracktheta       = track->theta();            
     double	   trackthetaerr    = track->thetaError();       
     double	   trackphi         = track->phi();              
@@ -277,7 +367,7 @@ SiStripAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup
     double	   trackvx          = track->vx();               
     double	   trackvy          = track->vy();               
     double	   trackvz          = track->vz();               
-    int           trackalgo        = (int)track->algo();
+    int            trackalgo        = (int)track->algo();
     
     std::vector<TrajectoryMeasurement> measurements = traj->measurements();
     for(std::vector<TrajectoryMeasurement>::const_iterator measurement_it = measurements.begin(); measurement_it!=measurements.end(); measurement_it++){
@@ -290,6 +380,10 @@ SiStripAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup
       const SiStripMatchedRecHit2D* sistripmatchedhit   = dynamic_cast<const SiStripMatchedRecHit2D*>(hit);
       const SiPixelRecHit*          sipixelhit          = dynamic_cast<const SiPixelRecHit*>(hit);
       
+      const uint32_t& detid = hit->geographicalId().rawId();
+      //      SiStripHelper::layers layer = static_cast<std::underlying_type_t<SiStripHelper::layers>>(checkLayer(detid,tTopo)); 
+      auto layer = checkLayer(detid,tTopo);
+
       const SiPixelCluster*   PixelCluster = NULL;
       const SiStripCluster*   StripCluster = NULL;
       uint32_t                DetId = 0;
@@ -318,6 +412,7 @@ SiStripAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup
 	
 	LocalVector             trackDirection = trajState.localDirection();
 	double                  cosine         = trackDirection.z()/trackDirection.mag();
+	double                  cosRZ          = fabs(trackDirection.z())/trackDirection.mag();
 	bool                    Saturation     = false;
 	bool                    Overlapping    = false;
 	unsigned int            Charge         = 0;
@@ -338,6 +433,26 @@ SiStripAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup
 	  NStrips                    = Ampls.size();
 	  int APVId                  = FirstStrip/128;
 	  
+	  SiStripClusterInfo SiStripClusterInfo_(*StripCluster,iSetup,detid);
+	  float    StoN     = SiStripClusterInfo_.signalOverNoise();
+	  float    noise    = SiStripClusterInfo_.noiseRescaledByGain();
+	  uint16_t charge   = SiStripClusterInfo_.charge();
+	  uint16_t width    = SiStripClusterInfo_.width();
+	  float position    = SiStripClusterInfo_.baryStrip();
+
+	  h_StoN->Fill(StoN);
+	  h_StoNCorr->Fill(StoN*cosRZ);
+
+	  if( (applyClusterQuality_) &&
+	      (SiStripClusterInfo_.signalOverNoise() > sToNLowerLimit_ &&
+	       SiStripClusterInfo_.signalOverNoise() < sToNUpperLimit_ &&
+	       SiStripClusterInfo_.width() > widthLowerLimit_ &&
+	       SiStripClusterInfo_.width() < widthUpperLimit_) ) { 
+	 
+	    h_StoN_layer[static_cast<SiStripHelper::layer>(layer)]->Fill(StoN); 
+	    h_StoNCorr_layer[static_cast<SiStripHelper::layer>(layer)]->Fill(StoN*cosRZ);
+	  }	  
+
 	  /*
 	    if(gainHandle.isValid()){ 
 	    PrevGain     =  gainHandle->getApvGain(APVId,gainHandle->getRange(DetId, 1),1); 
@@ -421,6 +536,9 @@ SiStripAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup
   p_nUsedClust_per_LS->Fill(ls,nUsedStripClus); 
   p_nUsedClust_vs_lumi->Fill(instLumi_,nUsedStripClus);
 
+  h_nClusters->Fill(nStripClus);	
+  h_nUsedClusters->Fill(nUsedStripClus);
+
 }
 
 
@@ -435,14 +553,27 @@ SiStripAnalyzer::beginJob()
   p_lumiVsLS_       = fs->make<TProfile>("lumiVsLS","scal lumi vs LS;LS;scal inst lumi E30 [Hz cm^{-2}]",2500,0,2500); 	
   h_CChargeOverPath = fs->make<TH1F>("clusterChargeOverPath","cluster charge over path;cluster charge / path;# clusters",100,0.,1000.);
 
+  h_StoN            = fs->make<TH1F>("clusterStoN","cluster Raw S/N;cluster raw S/N;# clusters",100,0.,100.);
+  h_StoNCorr        = fs->make<TH1F>("clusterStoNCorr","cluster S/N corrected for path lenght;cluster S/N;# clusters",100,0.,100.);
 
-  p_nClust_per_bx  = fs->make<TProfile>("nStripClustersVsBx","n. of strip clusters vs bx;bx id;n. strip clusters",3500,-0.5,3495.);     
-  p_nClust_per_LS = fs->make<TProfile>("nStripClustersVsLS","n. of strip clusters vs LS;LS; n. strip clusters",2500,0,2500);    
-  p_nClust_vs_lumi = fs->make<TProfile>("nStripClustersVsLumi","n. of strip clusters vs inst. lumi;scal inst lumi E30 [Hz cm^{-2}]; n. strip clusters",100,0.,15000.);    
-                       
-  p_nUsedClust_per_bx  = fs->make<TProfile>("nUsedStripClustersVsBx","n. of used strip clusters vs bx;bx id;n. strip clusters",3500,-0.5,3495.);     		    
-  p_nUsedClust_per_LS  = fs->make<TProfile>("nUsesStripClustersVsLS","n. of used strip clusters vs LS;LS; n. strip clusters",2500,0,2500);    			    
-  p_nUsedClust_vs_lumi = fs->make<TProfile>("nUsedStripClustersVsLumi","n. of used strip clusters vs inst. lumi;scal inst lumi E30 [Hz cm^{-2}]; n. strip clusters",100,0.,15000.);   
+  for ( int fooInt = SiStripHelper::TIBL1; fooInt != SiStripHelper::NUM_OF_TYPES; fooInt++ ){
+    SiStripHelper::layer layer = static_cast<SiStripHelper::layer>(fooInt);
+    std::string s_layer = getStringFromEnum(layer);
+    std::string append = myreplace(s_layer," ","_");
+
+    h_StoN_layer[layer]     = fs->make<TH1F>(Form("clusterStoN_%s",append.c_str()),Form("cluster Raw S/N (%s); %s cluster raw S/N;# clusters",s_layer.c_str(),s_layer.c_str()),100,0.,100.);
+    h_StoNCorr_layer[layer] = fs->make<TH1F>(Form("clusterStoNCorr_%s",append.c_str()),Form("cluster S/N (%s) corrected for path lenght;%s cluster S/N;# clusters",s_layer.c_str(),s_layer.c_str()),100,0.,100.);
+  }  
+
+  h_nClusters       = fs->make<TH1F>("nStripClusters","n. of Strip clusters;n. Strip clusters; events",5000,0.,5000.);
+  h_nUsedClusters   = fs->make<TH1F>("nUsedStripClusters","n. of selected Strip clusters;n. selected Strip clusters; events",2000,0.,2000.);
+
+  p_nClust_per_bx  = fs->make<TProfile>("nStripClustersVsBx","n. of Strip clusters vs bx;bx id;#LT n.clusters/event #GT",3500,-0.5,3495.);     
+  p_nClust_per_LS  = fs->make<TProfile>("nStripClustersVsLS","n. of Strip clusters vs LS;LS; #LT n.clusters/event #GT",2500,0,2500);    
+  p_nClust_vs_lumi = fs->make<TProfile>("nStripClustersVsLumi","n. of Strip clusters vs inst. lumi;scal inst lumi E30 [Hz cm^{-2}]; #LT n.clusters/event #GT",100,0.,15000.);        
+  p_nUsedClust_per_bx  = fs->make<TProfile>("nUsedStripClustersVsBx","n. of used Strip clusters vs bx;bx id;#LT n.clusters/event #GT",3500,-0.5,3495.);     		    
+  p_nUsedClust_per_LS  = fs->make<TProfile>("nUsesStripClustersVsLS","n. of used Strip clusters vs LS;LS; #LT n.clusters/event #GT",2500,0,2500);    			    
+  p_nUsedClust_vs_lumi = fs->make<TProfile>("nUsedStripClustersVsLumi","n. of used Strip clusters vs inst. lumi;scal inst lumi E30 [Hz cm^{-2}]; #LT n.clusters/event #GT",100,0.,15000.);   
 
 }
 
@@ -451,10 +582,17 @@ void
 SiStripAnalyzer::endJob() 
 {
   std::cout<<"bx:"<<maxBx<<" ls:"<<maxLS<<" instLumi:"<<maxLumi<<" PU:"<<maxPU<<std::endl;
+
+  for ( int fooInt = SiStripHelper::TIBL1; fooInt != SiStripHelper::NUM_OF_TYPES; fooInt++ ){
+    SiStripHelper::layer layer = static_cast<SiStripHelper::layer>(fooInt);
+    fitStoN( h_StoNCorr_layer[layer]);
+  }
 }
 
 // ------------ method to get the detector thickness ------------
+//****************************************************************/
 double SiStripAnalyzer::thickness(DetId id)
+//****************************************************************/
 {
   std::map<DetId,double>::iterator th=m_thicknessMap.find(id);
   if(th!=m_thicknessMap.end())
@@ -478,7 +616,9 @@ double SiStripAnalyzer::thickness(DetId id)
   }
 }
 
+//****************************************************************/
 bool SiStripAnalyzer::IsFarFromBorder(TrajectoryStateOnSurface* trajState, const uint32_t detid, const edm::EventSetup* iSetup)
+//****************************************************************/
 { 
   edm::ESHandle<TrackerGeometry> tkGeom; iSetup->get<TrackerDigiGeometryRecord>().get( tkGeom );
 
@@ -510,6 +650,212 @@ bool SiStripAnalyzer::IsFarFromBorder(TrajectoryStateOnSurface* trajState, const
 
   return true;
 }
+
+//****************************************************************/
+int SiStripAnalyzer::checkLayer( unsigned int iidd, const TrackerTopology* tTopo) 
+//****************************************************************/
+{
+  StripSubdetector strip=StripSubdetector(iidd);
+  unsigned int subid=strip.subdetId();
+  if (subid ==  StripSubdetector::TIB) { 
+    
+    return tTopo->tibLayer(iidd);
+  }
+  if (subid ==  StripSubdetector::TOB) { 
+    
+    return tTopo->tobLayer(iidd) + 4 ; 
+  }
+  if (subid ==  StripSubdetector::TID) { 
+    
+    return tTopo->tidWheel(iidd) + 10;
+  }
+  if (subid ==  StripSubdetector::TEC) { 
+    
+    return tTopo->tecWheel(iidd) + 13 ; 
+  }
+  return 0;
+}
+
+
+// -------------- method to get the topology from the detID ------------------------------
+//****************************************************************/
+std::string SiStripAnalyzer::getStringFromEnum(SiStripHelper::layer e)
+//****************************************************************/
+{
+  switch(e)
+    {
+    case SiStripHelper::TIBL1:  return "TIB L1";
+    case SiStripHelper::TIBL2:  return "TIB L2";
+    case SiStripHelper::TIBL3:  return "TIB L3";
+    case SiStripHelper::TIBL4:  return "TIB L4";
+    case SiStripHelper::TOBL1:  return "TOB L1";
+    case SiStripHelper::TOBL2:  return "TOB L2";
+    case SiStripHelper::TOBL3:  return "TOB L3";
+    case SiStripHelper::TOBL4:  return "TOB L4";
+    case SiStripHelper::TOBL5:  return "TOB L5";
+    case SiStripHelper::TOBL6:  return "TOB L6";
+    case SiStripHelper::TIDD1:  return "TID Disk 1";
+    case SiStripHelper::TIDD2:  return "TID Disk 2";
+    case SiStripHelper::TIDD3:  return "TID Disk 3";
+    case SiStripHelper::TECD1:  return "TEC Disk 1";
+    case SiStripHelper::TECD2:  return "TEC Disk 2";
+    case SiStripHelper::TECD3:  return "TEC Disk 3";  
+    case SiStripHelper::TECD4:  return "TEC Disk 4";
+    case SiStripHelper::TECD5:  return "TEC Disk 5";
+    case SiStripHelper::TECD6:  return "TEC Disk 6";
+    case SiStripHelper::TECD7:  return "TEC Disk 7";
+    case SiStripHelper::TECD8:  return "TEC Disk 8";
+    case SiStripHelper::TECD9:  return "TEC Disk 9";
+    default: 
+      edm::LogWarning("LogicError") << "Unknown partition: " <<  e;
+      return "";
+    }
+}
+
+//****************************************************************/
+std::string SiStripAnalyzer::myreplace(const std::string &s,const std::string &toReplace,const std::string &replaceWith)
+//****************************************************************/
+{
+  std::string replacement=s;
+  return(replacement.replace(replacement.find(toReplace),toReplace.length(),replaceWith));
+}
+
+//****************************************************************/
+Double_t SiStripAnalyzer::function_sum(Double_t *x, Double_t *par) 
+//****************************************************************/
+{
+    const Double_t xx =x[0];
+    return (1 - par[0]) * f2->Eval(xx) / par[1] + (par[0]) * f3->Eval(xx) / par[2];
+    //return (par[0]) * f2->Eval(xx) + (1 - par[0]) * f3->Eval(xx);
+}
+
+
+//****************************************************************/
+void SiStripAnalyzer::fitStoN(TH1F *hist)
+//****************************************************************/
+{
+  std::cout << "## Fitting TH1 histograms ##" << std::endl;
+  if (!m_verbose_fit) {
+    RooMsgService::instance().setGlobalKillBelow(RooFit::FATAL);
+  }
+
+  TCanvas *c1 = new TCanvas();
+  // Define common things for the different fits
+  
+  c1->Clear();
+
+  c1->SetLeftMargin(0.15);
+  c1->SetRightMargin(0.10);
+
+  Double_t xmin = 0;
+  Double_t xmax = 100;
+  RooRealVar StoN("StoN", "cluster S/N", xmin, xmax);
+  RooPlot* frame = StoN.frame();
+  RooDataHist datahist("datahist", "datahist", StoN, RooFit::Import(*hist));
+  datahist.plotOn(frame);
+  
+  // Try Landau convolved with a gaussian
+  RooRealVar meanG("#mu_{gauss}", "#mu_{gauss}", 0);
+  RooRealVar sigmaG("#sigma_{gauss}", "#sigma_{gauss}", 1, 0.1, 20);
+  RooRealVar meanL("MPV", "MPV", 30, 10, 50);
+  RooRealVar sigmaL("#sigma_{landau}", "#sigma_{landau}", 0.1, 100);
+  RooGaussian gaussian("gaussian", "gaussian", StoN, meanG, sigmaG);
+  RooLandau landau("landau", "landau", StoN, meanL, sigmaL);
+  // Set #bins to be used for FFT sampling to 10000
+  StoN.setBins(10000, "cache");
+  RooFFTConvPdf model("model", "landau (X) gauss", StoN, landau, gaussian) ;
+  if (m_verbose_fit) {
+    model.fitTo(datahist,RooFit::Range(12.,40.));
+  } else {
+    model.fitTo(datahist,RooFit::Range(12.,40.),RooFit::PrintLevel(-1));
+  }
+  model.plotOn(frame, RooFit::LineColor(kRed));
+  // Get the maxima
+  // lxg == landau (X) gauss
+  TF1 *lxg = model.asTF(RooArgList(StoN));
+
+  model.paramOn(frame,RooFit::Layout(0.55,0.9,0.8)) ;
+  Double_t xmax_lxg = lxg->GetMaximumX();
+  Double_t ymax_lxg = lxg->GetMaximum();
+  Double_t x1_lxg = lxg->GetX(ymax_lxg / 2., xmin, xmax_lxg);
+  Double_t x2_lxg = lxg->GetX(ymax_lxg / 2., xmax_lxg, xmax);
+  if (HIPDEBUG) {
+    std::cout << "From TF1, maximum at (x, y) = (" << xmax_lxg << " , " << ymax_lxg << ")" << std::endl;
+    std::cout << "From TF1, FWHM at (x1, x2) = (" << x1_lxg << " , " << x2_lxg << ")" << std::endl;
+  }
+  
+  makeNicePlotStyle(frame);
+
+  // Try landau + a gaussian
+  /*
+    RooRealVar meanG2("meanG2", "meanG2", 30, 10, 50);
+    RooRealVar sigmaG2("sigmaG2", "sigmaG2", 1, 1, 50);
+    RooRealVar meanL2("meanL2", "meanL2", 30, 10, 50);
+    RooRealVar sigmaL2("sigmaL2", "sigmaL2", 0.1, 100);
+    RooGaussian gaussian2("gaussian2", "gaussian2", StoN, meanG2, sigmaG2);
+    RooLandau landau2("landau2", "landau2", StoN, meanL2, sigmaL2);
+    RooRealVar x("x", "x", 0.1, 0, 0.4);
+    RooAddPdf model2("model2", "model2", gaussian2, landau2, x);
+    if (m_verbose_fit) {
+      model2.fitTo(datahist);
+    } else {
+      model2.fitTo(datahist, RooFit::PrintLevel(-1));
+    }
+    model2.plotOn(frame, RooFit::LineColor(kRed));
+    // Get the maxima
+    // lpg == landau + gauss
+    f2 = landau2.asTF(RooArgList(StoN));
+    f3 = gaussian2.asTF(RooArgList(StoN));
+    TF1 *lpg = new TF1("Sum", function_sum, 0, 100, 3);
+    lpg->SetParameter(0, x.getVal());
+    lpg->SetParameter(1, f2->Integral(0, 100));
+    lpg->SetParameter(2, f3->Integral(0, 100));
+    Double_t xmax_lpg = lpg->GetMaximumX();
+    Double_t ymax_lpg = lpg->GetMaximum();
+    Double_t x1_lpg = lpg->GetX(ymax_lpg / 2., xmin, xmax_lpg);
+    Double_t x2_lpg = lpg->GetX(ymax_lpg / 2., xmax_lpg, xmax);
+    if (HIPDEBUG) {
+      std::cout << "From TF1, maximum at (x, y) = (" << xmax_lpg << " , " << ymax_lpg << ")" << std::endl;
+      std::cout << "From TF1, FWHM at (x1, x2) = (" << x1_lpg << " , " << x2_lpg << ")" << std::endl;
+      }
+  */    
+
+  // Redraw data on top and print / store everything
+  datahist.plotOn(frame);
+  frame->GetYaxis()->SetTitle("n. of on-track clusters");
+  TString histName = hist->GetName();
+  frame->SetName("frame"+histName);
+  frame->SetTitle(hist->GetTitle());
+  frame->Draw();
+  //    m_output->cd();
+  //frame->Write();
+  if (HIPDEBUG) {
+    c1->Print("fit_debug"+histName+".pdf");
+  }
+  
+  delete lxg;
+  //delete lpg;
+  delete c1;
+}
+
+/*--------------------------------------------------------------------*/
+void SiStripAnalyzer::makeNicePlotStyle(RooPlot* plot)
+/*--------------------------------------------------------------------*/
+{ 
+  plot->GetXaxis()->CenterTitle(true);
+  plot->GetYaxis()->CenterTitle(true);
+  plot->GetXaxis()->SetTitleFont(42); 
+  plot->GetYaxis()->SetTitleFont(42);  
+  plot->GetXaxis()->SetTitleSize(0.05);
+  plot->GetYaxis()->SetTitleSize(0.05);
+  plot->GetXaxis()->SetTitleOffset(0.9);
+  plot->GetYaxis()->SetTitleOffset(1.3);
+  plot->GetXaxis()->SetLabelFont(42);
+  plot->GetYaxis()->SetLabelFont(42);
+  plot->GetYaxis()->SetLabelSize(.05);
+  plot->GetXaxis()->SetLabelSize(.05);
+}
+
 
 // ------------ method fills 'descriptions' with the allowed parameters for the module  ------------
 void
