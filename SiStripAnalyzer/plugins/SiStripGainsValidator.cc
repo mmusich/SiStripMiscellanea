@@ -132,15 +132,15 @@ namespace SiStripHelper {
 class SiStripGainsValidator : public edm::one::EDAnalyzer<edm::one::SharedResources>  {
    public:
       explicit SiStripGainsValidator(const edm::ParameterSet&);
-      ~SiStripGainsValidator();
+      ~SiStripGainsValidator() override;
 
       static void fillDescriptions(edm::ConfigurationDescriptions& descriptions);
 
 
    private:
-      virtual void beginJob() override;
-      virtual void analyze(const edm::Event&, const edm::EventSetup&) override;
-      virtual void endJob() override;
+      void beginJob() override;
+      void analyze(const edm::Event&, const edm::EventSetup&) override;
+      void endJob() override;
       double thickness(DetId id);
       bool IsFarFromBorder(TrajectoryStateOnSurface* trajState, const uint32_t detid, const edm::EventSetup* iSetup);
       int checkLayer( unsigned int iidd, const TrackerTopology* tTopo);
@@ -395,8 +395,8 @@ SiStripGainsValidator::analyze(const edm::Event& iEvent, const edm::EventSetup& 
       auto layer = checkLayer(detid,tTopo);
       SiStripHelper::layer myLayer = static_cast<SiStripHelper::layer>(layer);
 
-      const SiPixelCluster*   PixelCluster = NULL;
-      const SiStripCluster*   StripCluster = NULL;
+      const SiPixelCluster*   PixelCluster = nullptr;
+      const SiStripCluster*   StripCluster = nullptr;
       uint32_t                DetId = 0;
       
       for(unsigned int h=0;h<2;h++){
@@ -765,8 +765,8 @@ double SiStripGainsValidator::thickness(DetId id)
     double detThickness=1.;
     //compute thickness normalization
     const GeomDetUnit* it = m_tracker->idToDetUnit(DetId(id));
-    bool isPixel = dynamic_cast<const PixelGeomDetUnit*>(it)!=0;
-    bool isStrip = dynamic_cast<const StripGeomDetUnit*>(it)!=0;
+    bool isPixel = dynamic_cast<const PixelGeomDetUnit*>(it)!=nullptr;
+    bool isStrip = dynamic_cast<const StripGeomDetUnit*>(it)!=nullptr;
     if (!isPixel && ! isStrip) {
       //FIXME throw exception
       edm::LogWarning("DeDxHitsProducer") << "\t\t this detID doesn't seem to belong to the Tracker";
@@ -790,7 +790,7 @@ bool SiStripGainsValidator::IsFarFromBorder(TrajectoryStateOnSurface* trajState,
   LocalError  HitLocalError = trajState->localError().positionError() ;
 
   const GeomDetUnit* it = tkGeom->idToDetUnit(DetId(detid));
-  if (dynamic_cast<const StripGeomDetUnit*>(it)==0 && dynamic_cast<const PixelGeomDetUnit*>(it)==0) {
+  if (dynamic_cast<const StripGeomDetUnit*>(it)==nullptr && dynamic_cast<const PixelGeomDetUnit*>(it)==nullptr) {
      std::cout << "this detID doesn't seem to belong to the Tracker" << std::endl;
      return false;
   }
