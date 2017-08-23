@@ -1,6 +1,6 @@
 import FWCore.ParameterSet.Config as cms
 
-process = cms.Process("Demo")
+process = cms.Process("SiStripGainValidator")
 
 process.load("FWCore.MessageService.MessageLogger_cfi")
 process.MessageLogger.destinations = ['cout', 'cerr']
@@ -89,15 +89,15 @@ process.tracksRefit = TrackRefitter.clone(src = cms.InputTag("ALCARECOSiStripCal
 ###################################################################
 # The module
 ###################################################################
-process.demo = cms.EDAnalyzer('SiStripGainsValidator',
-                              Tracks      = cms.InputTag("tracksRefit")
-                              )
+process.SiStripGainsValidator = cms.EDAnalyzer('SiStripGainsValidator',
+                                               Tracks      = cms.InputTag("tracksRefit")
+                                               )
 
 ###################################################################
 # Output name
 ###################################################################
 process.TFileService = cms.Service("TFileService",
-                                   fileName = cms.string("test.root")
+                                   fileName = cms.string("SiStripGainValidation.root")
                                    )
 
-process.p = cms.Path(process.offlineBeamSpot*process.MeasurementTrackerEvent*process.tracksRefit*process.demo)
+process.p = cms.Path(process.offlineBeamSpot*process.MeasurementTrackerEvent*process.tracksRefit*process.SiStripGainsValidator)

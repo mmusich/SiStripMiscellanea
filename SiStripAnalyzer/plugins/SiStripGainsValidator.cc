@@ -81,6 +81,7 @@
 #include "DataFormats/TrackReco/interface/TrackDeDxHits.h"
 
 #include "CalibFormats/SiStripObjects/interface/SiStripGain.h" 
+#include "CalibFormats/SiStripObjects/interface/SiStripQuality.h"
 #include "CalibTracker/Records/interface/SiStripGainRcd.h"  
 
 #include "DataFormats/TrackerCommon/interface/TrackerTopology.h"
@@ -117,8 +118,6 @@ namespace SiStripHelper {
 	      NUM_OF_TYPES=23,
   };
 }
-
-
 
 //
 // class declaration
@@ -173,6 +172,11 @@ class SiStripGainsValidator : public edm::one::EDAnalyzer<edm::one::SharedResour
       TH1F*     h_nClusters;
       TH1F*     h_nUsedClusters;
 
+      TH1F*     h_APVGain;          
+      TH1F*     h_SumStripGain;  
+      TH1F*     h_diffAPVfromClusterGain;
+      TH1F*     h_diffAPVfromClusterGainNoOverlap;
+
       TH1F*     h_CChargeOverPath;
       TH1F*     h_CChargeOverPathNewG2;
       TH1F*     h_CChargeOverPathNoG2;
@@ -181,6 +185,11 @@ class SiStripGainsValidator : public edm::one::EDAnalyzer<edm::one::SharedResour
 
       TH1F*     h_StoN;
       TH1F*     h_StoNCorr;
+  
+      TH1F*     h_Noise;
+      TH1F*     h_chargeFromClusterInfo;
+      TH1F*     h_clusterwidth;
+      TH1F*     h_clusterposition;      
 
       std::vector<TH1*> vTrackHistos_;
   
@@ -259,6 +268,9 @@ SiStripGainsValidator::analyze(const edm::Event& iEvent, const edm::EventSetup& 
   m_tracker=&(* theTrackerGeometry );
   edm::ESHandle<SiStripGain> gainHandle;                      iSetup.get<SiStripGainRcd>().get(gainHandle);
   
+  edm::ESHandle<SiStripQuality> qualityHandle;                iSetup.get<SiStripQualityRcd>().get("",qualityHandle);
+  const SiStripQuality* stripQuality = qualityHandle.product();
+
   // gain to be validated
   edm::ESHandle<SiStripApvGain> g3Handle;                     iSetup.get<SiStripApvGain3Rcd>().get(g3Handle);
 
@@ -319,18 +331,7 @@ SiStripGainsValidator::analyze(const edm::Event& iEvent, const edm::EventSetup& 
 
     static const int dzerrindex = this->GetIndex(vTrackHistos_,"h_trackdzerr");
     vTrackHistos_[dzerrindex]->Fill(trackdzerr);
-
-    /*
-
-    static const int thetaerrindex = this->GetIndex(vTrackHistos_,"h_trackthetaerr");
-    vTrackHistos_[thetaerrindex]->Fill(trackthetaerr);
-
-    static const int phierrindex = this->GetIndex(vTrackHistos_,"h_trackphierr");
-    vTrackHistos_[phierrindex]->Fill(trackphierr);
     
-    static const int kappaerrindex = this->GetIndex(vTrackHistos_,"h_curvatureerr");
-    vTrackHistos_[kappaerrindex]->Fill(trackqoverperr);
-
     static const int vxindex = this->GetIndex(vTrackHistos_,"h_trackvx");
     vTrackHistos_[vxindex]->Fill(trackvx);
 
@@ -340,10 +341,18 @@ SiStripGainsValidator::analyze(const edm::Event& iEvent, const edm::EventSetup& 
     static const int vzindex = this->GetIndex(vTrackHistos_,"h_trackvz");
     vTrackHistos_[vzindex]->Fill(trackvz);
 
+    static const int thetaerrindex = this->GetIndex(vTrackHistos_,"h_trackthetaerr");
+    vTrackHistos_[thetaerrindex]->Fill(trackthetaerr);
+
+    static const int phierrindex = this->GetIndex(vTrackHistos_,"h_trackphierr");
+    vTrackHistos_[phierrindex]->Fill(trackphierr);
+
+    static const int kappaerrindex = this->GetIndex(vTrackHistos_,"h_curvatureerr");
+    vTrackHistos_[kappaerrindex]->Fill(trackqoverperr);
+
     static const int algoindex = this->GetIndex(vTrackHistos_,"h_trackalgo");
     vTrackHistos_[algoindex]->Fill(trackalgo);
-    */
-
+   
     static const int normchi2index = this->GetIndex(vTrackHistos_,"h_normchi2");
     vTrackHistos_[normchi2index]->Fill(trackchi2ndof);
     static const int ptindex = this->GetIndex(vTrackHistos_,"h_pt");
@@ -352,14 +361,22 @@ SiStripGainsValidator::analyze(const edm::Event& iEvent, const edm::EventSetup& 
       vTrackHistos_[ptResolutionindex]->Fill(trackpterr/trackpt);
     }
     vTrackHistos_[ptindex]->Fill(trackpt);
+
     static const int etaindex = this->GetIndex(vTrackHistos_,"h_tracketa");
     vTrackHistos_[etaindex]->Fill(tracketa);
+
+    static const int etaerrindex = this->GetIndex(vTrackHistos_,"h_tracketaerr");
+    vTrackHistos_[etaerrindex]->Fill(tracketaerr);
+
     static const int phiindex = this->GetIndex(vTrackHistos_,"h_trackphi");
     vTrackHistos_[phiindex]->Fill(trackphi);
+
     static const int numOfValidHitsindex = this->GetIndex(vTrackHistos_,"h_trackNumberOfValidHits");
     vTrackHistos_[numOfValidHitsindex]->Fill(trackhitsvalid);
+
     static const int numOfLostHitsindex = this->GetIndex(vTrackHistos_,"h_trackNumberOfLostHits");
     vTrackHistos_[numOfLostHitsindex]->Fill(trackhitslost);
+
     static const int kappaindex = this->GetIndex(vTrackHistos_,"h_curvature");
     vTrackHistos_[kappaindex]->Fill(trackqoverp);
 
@@ -376,6 +393,7 @@ SiStripGainsValidator::analyze(const edm::Event& iEvent, const edm::EventSetup& 
       
       const uint32_t& detid = hit->geographicalId().rawId();
       auto layer = checkLayer(detid,tTopo);
+      SiStripHelper::layer myLayer = static_cast<SiStripHelper::layer>(layer);
 
       const SiPixelCluster*   PixelCluster = NULL;
       const SiStripCluster*   StripCluster = NULL;
@@ -434,11 +452,16 @@ SiStripGainsValidator::analyze(const edm::Event& iEvent, const edm::EventSetup& 
 	  uint16_t width    = SiStripClusterInfo_.width();
 	  float position    = SiStripClusterInfo_.baryStrip();
 	  
+	  h_Noise->Fill(noise);
+	  h_chargeFromClusterInfo->Fill(charge);
+	  h_clusterwidth->Fill(width);
+	  h_clusterposition->Fill(position);
+
 	  h_StoN->Fill(StoN);
 	  h_StoNCorr->Fill(StoN*cosRZ);
 	  	  
-	  h_StoN_layer[static_cast<SiStripHelper::layer>(layer)]->Fill(StoN); 
-	  h_StoNCorr_layer[static_cast<SiStripHelper::layer>(layer)]->Fill(StoN*cosRZ);
+	  h_StoN_layer[myLayer]->Fill(StoN); 
+	  h_StoNCorr_layer[myLayer]->Fill(StoN*cosRZ);
 
 	  if(gainHandle.isValid()){ 
 	    PrevGain     =  gainHandle->getApvGain(APVId,gainHandle->getRange(DetId, 1),1); 
@@ -479,6 +502,28 @@ SiStripGainsValidator::analyze(const edm::Event& iEvent, const edm::EventSetup& 
 	  mCharge4 *= (PrevGain*PrevGainTick);     // remove G1 and G2
 	  mCharge1 *= (PrevGain/NewGain);          // remove old G2 and apply new G2
 	  
+	  // Getting raw charge with strip gain.
+
+	  double clustergain = 0 ;
+	  double cleanclustergain = 0 ;
+	  // SiStripClusterInfo.stripCharges() <==> SiStripCluster.amplitudes()
+	  for( size_t chidx = 0 ; chidx < SiStripClusterInfo_.stripCharges().size() ; ++chidx ){
+	    if( SiStripClusterInfo_.stripCharges().at(chidx) <= 0 ){ continue ; } // nonzero amplitude
+	    clustergain += gainHandle->getStripGain(SiStripClusterInfo_.firstStrip()+chidx, gainHandle->getRange(DetId));	    
+	    if( stripQuality->IsStripBad(stripQuality->getRange(DetId), SiStripClusterInfo_.firstStrip()+chidx)) { continue ; }
+	    cleanclustergain += gainHandle->getStripGain(SiStripClusterInfo_.firstStrip()+chidx, gainHandle->getRange(DetId));	 
+	  }
+	  clustergain /= double(SiStripClusterInfo_.stripCharges().size()) ; // calculating average gain inside cluster
+	  cleanclustergain /= double(SiStripClusterInfo_.stripCharges().size());
+
+	  //std::cout<< "effect of bad strips: "<<clustergain - cleanclustergain << std::endl;
+
+	  //if(clustergain!=(PrevGain*PrevGainTick)) std::cout<<"clustergain: "<<clustergain<<" | apvgain:"<< (PrevGain*PrevGainTick) <<std::endl;
+
+	  h_APVGain->Fill(PrevGain*PrevGainTick);          
+	  h_SumStripGain->Fill(clustergain);         
+	  h_diffAPVfromClusterGain->Fill(fabs(clustergain-(PrevGain*PrevGainTick)));
+
 	  if(FirstStrip==0                                  )Overlapping=true;
 	  if(FirstStrip==128                                )Overlapping=true;
 	  if(FirstStrip==256                                )Overlapping=true;
@@ -508,6 +553,8 @@ SiStripGainsValidator::analyze(const edm::Event& iEvent, const edm::EventSetup& 
 	  if(Saturation      && !AllowSaturation    )continue;
 	  if(NStrips         >  MaxNrStrips         )continue;
 
+	  h_diffAPVfromClusterGainNoOverlap->Fill(fabs(clustergain-(PrevGain*PrevGainTick)));
+
 	  double ChargeOverPath = (double)Charge / Path ;		  
 	  h_CChargeOverPath->Fill(ChargeOverPath);
 	  h_CChargeOverPathNewG2->Fill(double(mCharge1) / Path);
@@ -515,11 +562,11 @@ SiStripGainsValidator::analyze(const edm::Event& iEvent, const edm::EventSetup& 
 	  h_CChargeOverPathNoG1->Fill(double(mCharge3) / Path);   
 	  h_CChargeOverPathNoG1G2->Fill(double(mCharge4) / Path); 
 
-	  h_CChargeOverPath_layer[static_cast<SiStripHelper::layer>(layer)]->Fill(ChargeOverPath); 
-	  h_CChargeOverPathNewG2_layer[static_cast<SiStripHelper::layer>(layer)]->Fill(double(mCharge1) / Path);
-	  h_CChargeOverPathNoG2_layer[static_cast<SiStripHelper::layer>(layer)]->Fill(double(mCharge2) / Path);   
-	  h_CChargeOverPathNoG1_layer[static_cast<SiStripHelper::layer>(layer)]->Fill(double(mCharge3) / Path);   
-	  h_CChargeOverPathNoG1G2_layer[static_cast<SiStripHelper::layer>(layer)]->Fill(double(mCharge4) / Path); 
+	  h_CChargeOverPath_layer[myLayer]->Fill(ChargeOverPath); 
+	  h_CChargeOverPathNewG2_layer[myLayer]->Fill(double(mCharge1) / Path);
+	  h_CChargeOverPathNoG2_layer[myLayer]->Fill(double(mCharge2) / Path);   
+	  h_CChargeOverPathNoG1_layer[myLayer]->Fill(double(mCharge3) / Path);   
+	  h_CChargeOverPathNoG1G2_layer[myLayer]->Fill(double(mCharge4) / Path); 
 
 	  if(tracketa        < MinTrackEta          )continue;
 	  if(tracketa        > MaxTrackEta          )continue;
@@ -565,6 +612,18 @@ SiStripGainsValidator::beginJob()
   h_StoN                  = fs->make<TH1F>("clusterStoN","cluster Raw S/N;cluster raw S/N;# clusters",100,0.,100.);
   h_StoNCorr              = fs->make<TH1F>("clusterStoNCorr","cluster S/N corrected for path lenght;cluster S/N;# clusters",100,0.,100.);
 
+  h_Noise                 = fs->make<TH1F>("clusterNoise","cluster noise;cluster noise;# clusters",100,0.,100.);
+  h_chargeFromClusterInfo = fs->make<TH1F>("clusterCharge","cluster charge;cluster charge;# clusters",100,0.,1000.);
+  h_clusterwidth	  = fs->make<TH1F>("clusetWidth","cluster width;cluster width;# clusters",50,-0.5,49.5);	
+  h_clusterposition       = fs->make<TH1F>("clusterPosition","cluster position; cluster position; # clusters",100,0.,1000.);
+
+  h_APVGain               = fs->make<TH1F>("APVGain","average cluster gain (from APV);cluster gain;clusters",100,0.,2.);
+  h_SumStripGain          = fs->make<TH1F>("sumStripGain","average sum of strip gains;average sums of strips gains;clusters",100,0.,2.);
+
+  h_diffAPVfromClusterGain = fs->make<TH1F>("diffClusterFromAPVgain","#Delta(cluster gain,APV gain);#Delta(G_{cluster},G_{APV});clusters",100,0.,1.);
+
+  h_diffAPVfromClusterGainNoOverlap = fs->make<TH1F>("diffClusterFromAPVgainNoOverlap","#Delta(cluster gain,APV gain);#Delta(G_{cluster},G_{APV});clusters",100,0.,1.);
+
   h_CChargeOverPath       = fs->make<TH1F>("clusterChargeOverPath","cluster charge over path;cluster charge / path;# clusters",100,0.,1000.);
 
   h_CChargeOverPathNewG2  = fs->make<TH1F>("clusterChargeOverPathNewG2","cluster charge over path (new G2);cluster charge / path;# clusters",100,0.,1000.);
@@ -574,7 +633,7 @@ SiStripGainsValidator::beginJob()
   h_CChargeOverPathNoG1G2 = fs->make<TH1F>("clusterChargeOverPathNoG1G2","cluster charge over path (all gains removed);cluster charge / path;# clusters",100,0.,1000.);
 
   TFileDirectory StoN = fs->mkdir("SignalToNoise"); 
- TFileDirectory ClusterCharge = fs->mkdir("ClusterCharge");
+  TFileDirectory ClusterCharge = fs->mkdir("ClusterCharge");
 
   for ( int fooInt = SiStripHelper::TIBL1; fooInt != SiStripHelper::NUM_OF_TYPES; fooInt++ ){
     SiStripHelper::layer layer = static_cast<SiStripHelper::layer>(fooInt);
@@ -597,10 +656,18 @@ SiStripGainsValidator::beginJob()
 					 "Track #eta;#eta_{Track};Number of Tracks",
 					 90,-3.,3.));
 
+  vTrackHistos_.push_back(tfd.make<TH1F>("h_tracketaerr",
+					 "Track #eta error;err(#eta); Number of Tracks",
+					 100,0.,0.1));
+
   vTrackHistos_.push_back(tfd.make<TH1F>("h_trackphi",
 					 "Track #phi;#phi_{Track};Number of Tracks",
 					 90,-3.15,3.15));
-
+  
+  vTrackHistos_.push_back(tfd.make<TH1F>("h_trackphierr",
+					 "Track #phi error;err(#phi) [rad]; Number of Tracks",
+					 100,0.,0.1));
+  
   vTrackHistos_.push_back(tfd.make<TH1F>("h_trackNumberOfValidHits",
 					 "Track # of valid hits;# of valid hits _{Track};Number of Tracks",
 					 40,0.,40.));
@@ -610,8 +677,12 @@ SiStripGainsValidator::beginJob()
 					 10,0.,10.));
   
   vTrackHistos_.push_back(tfd.make<TH1F>("h_curvature",
-					 "Curvature #kappa;#kappa_{Track};Number of Tracks",
-					 100,-.05,.05));
+					 "Curvature #kappa;#kappa_{Track} [GeV^{-1}];Number of Tracks",
+					 100,-0.5,0.5));
+
+  vTrackHistos_.push_back(tfd.make<TH1F>("h_curvatureerr",
+					 "Track Curvature error;err(#kappa) [GeV^{-1}]",
+					 100,0.,0.1));
 
   vTrackHistos_.push_back(tfd.make<TH1F>("h_chi2",
 					 "#chi^{2};#chi^{2}_{Track};Number of Tracks",
@@ -639,24 +710,44 @@ SiStripGainsValidator::beginJob()
   
   vTrackHistos_.push_back(tfd.make<TH1F>("h_tracktheta",
 					 "track #theta;track #theta angle;Number of Tracks",
-					 100,-3.15,-3.15));
-    
+					 100,0.,-3.15));
+
+  vTrackHistos_.push_back(tfd.make<TH1F>("h_trackthetaerr",
+					 "track #theta error;err(#theta) [rad]; Number of Tracks",
+					 100,0.,0.1));
+     
   vTrackHistos_.push_back(tfd.make<TH1F>("h_trackdxy",
-					 "Transverse Impact Parameter;d_{xy} [cm]",
+					 "Transverse Impact Parameter;d_{xy} [cm]; Number of Tracks",
 					 200,-1.,1.));
   
   vTrackHistos_.push_back(tfd.make<TH1F>("h_trackdz",
-					 "Longitudinal Impact Parameter;d_{z} [cm]",
+					 "Longitudinal Impact Parameter;d_{z} [cm]; Number of Tracks",
 					 200,-30.,30.));
 
+  vTrackHistos_.push_back(tfd.make<TH1F>("h_trackvx",
+					 "track x-coordinate reference point;track v_{x} [cm]; Number of Tracks",
+					 200,-1.,1.));
+  
+  vTrackHistos_.push_back(tfd.make<TH1F>("h_trackvy",
+					 "track y-coordinate reference point;track v_{y} [cm]; Number of Tracks",
+					 200,-1.,1.));
+
+  vTrackHistos_.push_back(tfd.make<TH1F>("h_trackvz",
+					 "track z-coordinate reference point;track v_{z} [cm]; Number of Tracks",
+					 200,-10.,10.));
+
   vTrackHistos_.push_back(tfd.make<TH1F>("h_trackdxyerr",
-					 "Transverse Impact Parameter erro;err(d_{xy}) [cm]",
-					 100,0.,0.1));
+					 "Transverse Impact Parameter error;err(d_{xy}) [cm]; Number of Tracks",
+					 100,0.,0.2));
   
   vTrackHistos_.push_back(tfd.make<TH1F>("h_trackdzerr",
-					 "Longitudinal Impact Parameter error;err(d_{z}) [cm]",
-					 100,0.,1.));
+					 "Longitudinal Impact Parameter error;err(d_{z}) [cm]; Number of Tracks",
+					 100,0.,2.));
   
+  vTrackHistos_.push_back(tfd.make<TH1F>("h_trackalgo",
+					 "tracking algorithm;tracking algorithm; Number of Tracks",
+					 15,-0.5,14.5));
+
   h_nClusters       = fs->make<TH1F>("nStripClusters","n. of Strip clusters;n. Strip clusters; events",5000,0.,5000.);
   h_nUsedClusters   = fs->make<TH1F>("nUsedStripClusters","n. of selected Strip clusters;n. selected Strip clusters; events",2000,0.,2000.);
 
