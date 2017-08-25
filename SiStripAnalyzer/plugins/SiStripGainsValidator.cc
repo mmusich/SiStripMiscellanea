@@ -88,6 +88,7 @@
 #include "Geometry/Records/interface/TrackerTopologyRcd.h"
 
 #include "TF1.h"
+#include "TH2.h"
 #include "TH1I.h"
 #include "TProfile.h"
 
@@ -177,6 +178,9 @@ class SiStripGainsValidator : public edm::one::EDAnalyzer<edm::one::SharedResour
       TH1F*     h_diffAPVfromClusterGain;
       TH1F*     h_diffAPVfromClusterGainNoOverlap;
 
+      TH1F*     h_chargeFromStrips;
+      TH1F*     h_diffChargeMethod;
+
       TH1F*     h_CChargeOverPath;
       TH1F*     h_CChargeOverPathNewG2;
       TH1F*     h_CChargeOverPathNoG2;
@@ -190,6 +194,9 @@ class SiStripGainsValidator : public edm::one::EDAnalyzer<edm::one::SharedResour
       TH1F*     h_chargeFromClusterInfo;
       TH1F*     h_clusterwidth;
       TH1F*     h_clusterposition;      
+
+      TProfile* p_ClusterChargeVsLS;
+      TH2F*     h2_ClusterChargeVsLS;
 
       std::vector<TH1*> vTrackHistos_;
   
@@ -256,6 +263,9 @@ SiStripGainsValidator::analyze(const edm::Event& iEvent, const edm::EventSetup& 
 {
   using namespace edm;
   
+  //  int bx = iEvent.bunchCrossing();
+  int ls = iEvent.id().luminosityBlock();
+
   unsigned int nStripClus     = 0;
   unsigned int nUsedStripClus = 0;
   
@@ -306,6 +316,14 @@ SiStripGainsValidator::analyze(const edm::Event& iEvent, const edm::EventSetup& 
     double	   trackvy          = track->vy();               
     double	   trackvz          = track->vz();               
     int            trackalgo        = (int)track->algo();
+    
+    if(tracketa        < MinTrackEta          )continue;
+    if(tracketa        > MaxTrackEta          )continue;
+    if(trackmomentum   < MinTrackMomentum     )continue;
+    if(trackmomentum   > MaxTrackMomentum     )continue;
+    if(trackhitsvalid  < MinTrackHits         )continue;
+    if(trackchi2ndof   > MaxTrackChiOverNdf   )continue;
+    if(trackalgo       > MaxTrackingIteration )continue;
     
     // fill control plots
     static const int chi2index = this->GetIndex(vTrackHistos_,"h_chi2");
@@ -437,13 +455,16 @@ SiStripGainsValidator::analyze(const edm::Event& iEvent, const edm::EventSetup& 
 	std::vector<unsigned char> amplitude;
 	
 	if(StripCluster){
-	  
+	
+	  unsigned int FirstAmplitude=0;
 	  nStripClus++;
 	  
 	  const auto &Ampls          = StripCluster->amplitudes();
 	  FirstStrip                 = StripCluster->firstStrip();
 	  NStrips                    = Ampls.size();
 	  int APVId                  = FirstStrip/128;
+	  
+	  FirstAmplitude+=NStrips;
 	  
 	  SiStripClusterInfo SiStripClusterInfo_(*StripCluster,iSetup,detid);
 	  float    StoN     = SiStripClusterInfo_.signalOverNoise();
@@ -482,13 +503,17 @@ SiStripGainsValidator::analyze(const edm::Event& iEvent, const edm::EventSetup& 
 	    amplitude.push_back( Ampls[a] );
 	  }
 	  
+	  h_chargeFromStrips->Fill(Charge);
+	  h_diffChargeMethod->Fill(std::abs(Charge-charge));
+
 	  // Fill monitoring histograms
 	  int mCharge1 = 0;
 	  int mCharge2 = 0;
 	  int mCharge3 = 0;
 	  int mCharge4 = 0;
-	  for(unsigned int s=0;s<Ampls.size();s++){
-	    int StripCharge = Ampls[s];
+	  for(unsigned int s=0;s<NStrips;s++){
+	    int StripCharge = Ampls[FirstAmplitude-NStrips+s];
+	    //int StripCharge = Ampls[s];
 	    if(StripCharge>1024)      StripCharge = 255;
 	    else if(StripCharge>254)  StripCharge = 254;
 	    mCharge1 += StripCharge;
@@ -555,7 +580,11 @@ SiStripGainsValidator::analyze(const edm::Event& iEvent, const edm::EventSetup& 
 
 	  h_diffAPVfromClusterGainNoOverlap->Fill(fabs(clustergain-(PrevGain*PrevGainTick)));
 
-	  double ChargeOverPath = (double)Charge / Path ;		  
+	  double ChargeOverPath = (double)Charge / Path ;	
+
+	  p_ClusterChargeVsLS->Fill(ls,ChargeOverPath);
+	  h2_ClusterChargeVsLS->Fill(ls,ChargeOverPath);
+	  
 	  h_CChargeOverPath->Fill(ChargeOverPath);
 	  h_CChargeOverPathNewG2->Fill(double(mCharge1) / Path);
 	  h_CChargeOverPathNoG2->Fill(double(mCharge2) / Path);   
@@ -567,14 +596,6 @@ SiStripGainsValidator::analyze(const edm::Event& iEvent, const edm::EventSetup& 
 	  h_CChargeOverPathNoG2_layer[myLayer]->Fill(double(mCharge2) / Path);   
 	  h_CChargeOverPathNoG1_layer[myLayer]->Fill(double(mCharge3) / Path);   
 	  h_CChargeOverPathNoG1G2_layer[myLayer]->Fill(double(mCharge4) / Path); 
-
-	  if(tracketa        < MinTrackEta          )continue;
-	  if(tracketa        > MaxTrackEta          )continue;
-	  if(trackmomentum   < MinTrackMomentum     )continue;
-	  if(trackmomentum   > MaxTrackMomentum     )continue;
-	  if(trackhitsvalid  < MinTrackHits         )continue;
-	  if(trackchi2ndof   > MaxTrackChiOverNdf   )continue;
-	  if(trackalgo       > MaxTrackingIteration )continue;
 	 	  
 	  nUsedStripClus++;
 	  
@@ -614,6 +635,10 @@ SiStripGainsValidator::beginJob()
 
   h_Noise                 = fs->make<TH1F>("clusterNoise","cluster noise;cluster noise;# clusters",100,0.,100.);
   h_chargeFromClusterInfo = fs->make<TH1F>("clusterCharge","cluster charge;cluster charge;# clusters",100,0.,1000.);
+  h_chargeFromStrips      = fs->make<TH1F>("sumOfStripsCharge","cluster charge from strips;cluster charge;# clusters",100,0.,1000.);
+  
+  h_diffChargeMethod      = fs->make<TH1F>("diffChargeMethod","#Delta(cluster charge,#Sigma strips charge);#Delta(Q_{c},#Sigma_{s} Q_{s});clusters",100,0.,100.);
+
   h_clusterwidth	  = fs->make<TH1F>("clusetWidth","cluster width;cluster width;# clusters",50,-0.5,49.5);	
   h_clusterposition       = fs->make<TH1F>("clusterPosition","cluster position; cluster position; # clusters",100,0.,1000.);
 
@@ -626,8 +651,10 @@ SiStripGainsValidator::beginJob()
 
   h_CChargeOverPath       = fs->make<TH1F>("clusterChargeOverPath","cluster charge over path;cluster charge / path;# clusters",100,0.,1000.);
 
-  h_CChargeOverPathNewG2  = fs->make<TH1F>("clusterChargeOverPathNewG2","cluster charge over path (new G2);cluster charge / path;# clusters",100,0.,1000.);
+  p_ClusterChargeVsLS     = fs->make<TProfile>("p_ClusterChargeVsLS","cluster charge / path per LS;LS; #LT cluster charge / path #GT",2500,0,2500); 
+  h2_ClusterChargeVsLS    = fs->make<TH2F>("h2_ClusterChargeVsLS","cluster charge / path per LS;LS; cluster charge / path",2500,0,2500,100,0.,1000.); 
 
+  h_CChargeOverPathNewG2  = fs->make<TH1F>("clusterChargeOverPathNewG2","cluster charge over path (new G2);cluster charge / path;# clusters",100,0.,1000.);
   h_CChargeOverPathNoG2   = fs->make<TH1F>("clusterChargeOverPathNoG2","cluster charge over path (G2 removed);cluster charge / path;# clusters",100,0.,1000.);
   h_CChargeOverPathNoG1   = fs->make<TH1F>("clusterChargeOverPathNoG1","cluster charge over path (G1 removed);cluster charge / path;# clusters",100,0.,1000.);
   h_CChargeOverPathNoG1G2 = fs->make<TH1F>("clusterChargeOverPathNoG1G2","cluster charge over path (all gains removed);cluster charge / path;# clusters",100,0.,1000.);

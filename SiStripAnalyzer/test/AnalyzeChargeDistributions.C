@@ -164,8 +164,9 @@ void AnalyzeChargeDistibutions(TString file)
     return;
   }
 
-  TString dets[10] = {"TIB_L1","TIB_L2","TIB_L3","TIB_L4","TOB_L1","TOB_L2","TOB_L3","TOB_L4","TOB_L5","TOB_L6"};
-  TH1F *histosToFit[10];
+  TString dets[22] = {"TIB_L1","TIB_L2","TIB_L3","TIB_L4","TOB_L1","TOB_L2","TOB_L3","TOB_L4","TOB_L5","TOB_L6","TID_Disk 1","TID_Disk 2","TID_Disk 3",
+		      "TEC_Disk 1","TEC_Disk 2","TEC_Disk 3","TEC_Disk 4","TEC_Disk 5","TEC_Disk 6","TEC_Disk 7","TEC_Disk 8","TEC_Disk 9"};
+  TH1F *histosToFit[22];
 
   TCanvas* dummyC = new TCanvas("Canv","Canv",800,600);
   dummyC->cd()->SetLeftMargin(0.17);
@@ -200,7 +201,7 @@ void AnalyzeChargeDistibutions(TString file)
   sv[2]=25000.0;       // Total area (integral -inf to inf, normalization constant)  
   sv[3]=10.0;	       // Width (sigma) of convoluted Gaussian function              
       
-  for(Int_t i=0;i<10;i++){
+  for(Int_t i=0;i<22;i++){
     std::cout<<"Analyzing: "<<dets[i].Data()<<std::endl;
     histosToFit[i] = (TH1F*)f->Get(Form("SiStripGainsValidator/ClusterCharge/clusterChargeOverPathNewG2_%s",dets[i].Data()));
     makeNicePlotStyle(histosToFit[i]);
@@ -211,7 +212,7 @@ void AnalyzeChargeDistibutions(TString file)
     // make sure there is at least 1000k tracks in the plot
     if(histosToFit[i]->GetEntries()<5000){
       std::cout<<"not enough clusters to make sensible plot"<<std::endl;
-      return;
+      continue;
     }
 
     Double_t chisqr;
