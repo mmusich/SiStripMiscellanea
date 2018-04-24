@@ -42,7 +42,7 @@ void compareAll(TString file1,TString file2, TString leg1, TString leg2)
   TFile *f1 = TFile::Open(file1);
   TFile *f2 = TFile::Open(file2);
 
-  f1->cd("DQMData/Run 297219/AlCaReco/Run summary/");
+  f1->cd("DQMData/Run 999999/AlCaReco/Run summary/");
 
   int i=0;
   int j=0;
@@ -53,7 +53,7 @@ void compareAll(TString file1,TString file2, TString leg1, TString leg2)
   std::ofstream ofs ("check.txt", std::ofstream::out);
 
   TIter nextkey(gDirectory->GetListOfKeys());
-  while (TKey* key = (TKey*)nextkey()) {
+  while ( TKey* key = (TKey*)nextkey() ) {
     //std::cout << "i: " << i << std::endl;
     ++i;
     TObject* obj = key->ReadObj();
@@ -64,13 +64,13 @@ void compareAll(TString file1,TString file2, TString leg1, TString leg2)
       continue;
     }
     if ( obj->IsA()->InheritsFrom("TDirectory") ){
-      f1->cd(("DQMData/Run 297219/AlCaReco/Run summary/"+name).c_str());
+      f1->cd(("DQMData/Run 999999/AlCaReco/Run summary/"+name).c_str());
       TIter nextkey(gDirectory->GetListOfKeys());                                                                             
-      while (key = (TKey*)nextkey()) { 
+      while ( (key = (TKey*)nextkey()) ) { 
 	obj = key->ReadObj();                                                                                         
 	if (obj->IsA()->InheritsFrom("TH1")) {                                                                                
 	  TH1* h = (TH1*)obj;                                                                              
-	  TString fullpath = "DQMData/Run 297219/AlCaReco/Run summary/"+name+"/"+h->GetName();
+	  TString fullpath = "DQMData/Run 999999/AlCaReco/Run summary/"+name+"/"+h->GetName();
 	  //std::cout << "j: " << j << " "<< h->GetName() <<" "<< fullpath << std::endl;
 	  ++j;
 	  if(TString(h->GetName()).Contains("Charge_Vs_Index") ) continue;
@@ -107,9 +107,12 @@ void compareAll(TString file1,TString file2, TString leg1, TString leg2)
 	    continue;
 	  }
 
+	  h->Sumw2();
+	  h2->Sumw2();
+
 	  h2->SetMarkerColor(kBlue);
 	  h2->SetLineColor(kBlue);
-	  h2->SetMarkerStyle(kOpenCircle);
+	  h2->SetMarkerStyle(kFullCircle);
 	  h2->GetXaxis()->SetLabelOffset(0.2);
 	  h2->GetYaxis()->SetTitleOffset(0.8);
 
@@ -121,8 +124,8 @@ void compareAll(TString file1,TString file2, TString leg1, TString leg2)
 	  if (!obj->IsA()->InheritsFrom("TH2")){
 	    Double_t theMaximum = getMaximum(arrayHistos);
 	    h->GetYaxis()->SetRangeUser(0.,theMaximum*1.30);
-	    h->Draw();
-	    h2->Draw("same");
+	    h->Draw("HIST");
+	    h2->Draw("Psame");
 	  } else {
 	    c1->cd();
 	    pad1->cd();
@@ -236,7 +239,7 @@ void compareAll(TString file1,TString file2, TString leg1, TString leg2)
     } else if(obj->IsA()->InheritsFrom("TH1")) {
       obj = key->ReadObj();                                                                                         
       TH1* h = (TH1*)obj;                                                                              
-      TString fullpath = "DQMData/Run 297219/AlCaReco/Run summary/"+(TString)h->GetName();
+      TString fullpath = "DQMData/Run 999999/AlCaReco/Run summary/"+(TString)h->GetName();
       //std::cout << "j: " << j << " "<< h->GetName() <<" "<< fullpath << std::endl;
       ++j;
       if (obj->IsA()->InheritsFrom("TH2")) continue;
@@ -266,9 +269,12 @@ void compareAll(TString file1,TString file2, TString leg1, TString leg2)
 	continue;
       }
 
+      h->Sumw2();
+      h2->Sumw2();
+
       h2->SetMarkerColor(kBlue);
       h2->SetLineColor(kBlue);
-      h2->SetMarkerStyle(kOpenCircle);
+      h2->SetMarkerStyle(kFullCircle);
       h2->GetXaxis()->SetLabelOffset(0.2);
       h2->GetYaxis()->SetTitleOffset(0.8);
       
@@ -280,8 +286,8 @@ void compareAll(TString file1,TString file2, TString leg1, TString leg2)
       Double_t theMaximum = getMaximum(arrayHistos);
       h->GetYaxis()->SetRangeUser(0.,theMaximum*1.30);
 
-      h->Draw();
-      h2->Draw("same");
+      h->Draw("HIST");
+      h2->Draw("Psame");
       TString savename = fullpath.ReplaceAll("/","_");
       double ksProb = 0;
       
