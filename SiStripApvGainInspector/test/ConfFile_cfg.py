@@ -3,7 +3,13 @@ import FWCore.ParameterSet.Config as cms
 process = cms.Process("Demo")
 process.load("FWCore.MessageService.MessageLogger_cfi")
 
-process.source = cms.Source("EmptySource")
+process.source = cms.Source("EmptyIOVSource",
+                            firstValue = cms.uint64(317340),
+                            lastValue  = cms.uint64(317340),
+                            timetype  = cms.string('runnumber'),
+                            interval = cms.uint64(1)
+                            )
+
 
 process.maxEvents = cms.untracked.PSet( input = cms.untracked.int32(1) )
 
