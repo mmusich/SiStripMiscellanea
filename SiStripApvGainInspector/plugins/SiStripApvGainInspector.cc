@@ -21,6 +21,12 @@
 #include <memory>
 
 // user include files
+#include "CalibFormats/SiStripObjects/interface/SiStripDetCabling.h"
+#include "CalibFormats/SiStripObjects/interface/SiStripGain.h"
+#include "CalibFormats/SiStripObjects/interface/SiStripQuality.h"
+#include "CalibTracker/Records/interface/SiStripDetCablingRcd.h"
+#include "CalibTracker/Records/interface/SiStripGainRcd.h"
+#include "CalibTracker/Records/interface/SiStripQualityRcd.h"
 #include "CondFormats/SiStripObjects/interface/SiStripApvGain.h"
 #include "DataFormats/TrackerCommon/interface/TrackerTopology.h"
 #include "Geometry/Records/interface/TrackerTopologyRcd.h"
@@ -39,6 +45,8 @@
 #include "FWCore/Framework/interface/EventSetup.h"
 #include "Geometry/CommonDetUnit/interface/TrackingGeometry.h"
 #include "Geometry/Records/interface/TrackerDigiGeometryRecord.h"
+#include "FWCore/ServiceRegistry/interface/Service.h"
+#include "CommonTools/UtilAlgos/interface/TFileService.h"
 
 //
 // class declaration
@@ -51,6 +59,7 @@
 
 // ROOT includes
 #include "TFile.h"
+#include "TTree.h"
 #include "TH1F.h"
 #include "TH2S.h"
 #include "TProfile.h"
@@ -73,8 +82,13 @@ class SiStripApvGainInspector : public edm::one::EDAnalyzer<edm::one::SharedReso
       virtual void endJob() override;
       void checkBookAPVColls(const edm::EventSetup& es);
       void checkAndRetrieveTopology(const edm::EventSetup& setup);
+      bool isGoodLandauFit(double* FitResults);
+      void getPeakOfLandau(TH1* InputHisto, double* FitResults, double LowRange=50, double HighRange=5400);
+      void storeOnTree(TFileService* tfs);
 
       // ----------member data ---------------------------
+
+      TFileService *tfs;
 
       edm::ESHandle<TrackerGeometry> tkGeom_;
       const TrackerGeometry *bareTkGeomPtr_;  // ugly hack to fill APV colls only once, but checks
@@ -82,6 +96,10 @@ class SiStripApvGainInspector : public edm::one::EDAnalyzer<edm::one::SharedReso
 
       int NStripAPVs;
       int NPixelDets;
+  
+      unsigned int GOOD;
+      unsigned int BAD;
+      unsigned int MASKED;
 
       std::vector<std::shared_ptr<stAPVGain> > APVsCollOrdered;
       std::unordered_map<unsigned int, std::shared_ptr<stAPVGain> > APVsColl; 	
@@ -89,6 +107,7 @@ class SiStripApvGainInspector : public edm::one::EDAnalyzer<edm::one::SharedReso
       const TH2F* Charge_Vs_Index;
       TFile *fin;
       const std::string filename_;
+      double minNrEntries;
 };
 
 //
@@ -103,7 +122,12 @@ class SiStripApvGainInspector : public edm::one::EDAnalyzer<edm::one::SharedReso
 // constructors and destructor
 //
 SiStripApvGainInspector::SiStripApvGainInspector(const edm::ParameterSet& iConfig):
-  filename_(iConfig.getUntrackedParameter<std::string> ("inputFile"))
+  bareTkGeomPtr_(nullptr),
+  tTopo_(nullptr),
+  GOOD(0),
+  BAD(0),
+  filename_(iConfig.getUntrackedParameter<std::string> ("inputFile")),
+  minNrEntries(iConfig.getUntrackedParameter<double> ("minNrEntries",20))
 {
    //now do what ever initialization is needed
   fin = TFile::Open(filename_.c_str(),"READ");
@@ -133,7 +157,36 @@ SiStripApvGainInspector::analyze(const edm::Event& iEvent, const edm::EventSetup
    using namespace edm;
    this->checkBookAPVColls(iSetup); // check whether APV colls are booked and do so if not yet done
    this->checkAndRetrieveTopology(iSetup);
+   
+   edm::ESHandle<SiStripGain> gainHandle;
+   iSetup.get<SiStripGainRcd>().get(gainHandle);
+   if(!gainHandle.isValid()){edm::LogError("SiStripGainPCLHarvester")<< "gainHandle is not valid\n"; exit(0);}
 
+   edm::ESHandle<SiStripQuality> SiStripQuality_;
+   iSetup.get<SiStripQualityRcd>().get(SiStripQuality_);
+
+   for(unsigned int a=0;a<APVsCollOrdered.size();a++){
+    
+     std::shared_ptr<stAPVGain> APV = APVsCollOrdered[a];
+
+     if(APV->SubDet==PixelSubdetector::PixelBarrel || APV->SubDet==PixelSubdetector::PixelEndcap) continue;
+     
+     APV->isMasked      = SiStripQuality_->IsApvBad(APV->DetId,APV->APVId);
+    	  
+     if(gainHandle->getNumberOfTags()!=2){edm::LogError("SiStripGainPCLHarvester")<< "NUMBER OF GAIN TAG IS EXPECTED TO BE 2\n";fflush(stdout);exit(0);};		   
+     float newPreviousGain = gainHandle->getApvGain(APV->APVId,gainHandle->getRange(APV->DetId, 1),1);
+     if(APV->PreviousGain!=1 and newPreviousGain!=APV->PreviousGain)edm::LogWarning("SiStripGainPCLHarvester")<< "WARNING: ParticleGain in the global tag changed\n";
+     APV->PreviousGain = newPreviousGain;
+     
+     float newPreviousGainTick = gainHandle->getApvGain(APV->APVId,gainHandle->getRange(APV->DetId, 0),0);
+     if(APV->PreviousGainTick!=1 and newPreviousGainTick!=APV->PreviousGainTick){
+       edm::LogWarning("SiStripGainPCLHarvester")<< "WARNING: TickMarkGain in the global tag changed\n"<< std::endl
+						 <<" APV->SubDet: "<< APV->SubDet << " APV->APVId:" << APV->APVId << std::endl
+						 <<" APV->PreviousGainTick: "<<APV->PreviousGainTick<<" newPreviousGainTick: "<<newPreviousGainTick<<std::endl;
+    }
+     APV->PreviousGainTick = newPreviousGainTick;  	  
+   }
+   
    unsigned int I=0;
    TH1F* Proj = nullptr;
    double FitResults[6];
@@ -157,8 +210,26 @@ SiStripApvGainInspector::analyze(const edm::Event& iEvent, const edm::EventSetup
     Proj = (TH1F*)(Charge_Vs_Index->ProjectionY("",Charge_Vs_Index->GetXaxis()->FindBin(APV->Index),Charge_Vs_Index->GetXaxis()->FindBin(APV->Index),"e"));
     if(!Proj)continue;
 
+    getPeakOfLandau(Proj,FitResults);
+    APV->FitMPV      = FitResults[0];
+    APV->FitMPVErr   = FitResults[1];
+    APV->FitWidth    = FitResults[2];
+    APV->FitWidthErr = FitResults[3];
+    APV->FitChi2     = FitResults[4];
+    APV->FitNorm     = FitResults[5];
+    APV->NEntries    = Proj->GetEntries();
     
-  }
+    if(isGoodLandauFit(FitResults)){
+      APV->Gain = APV->FitMPV / MPVmean;
+      if(APV->SubDet>2)GOOD++;
+    }else{
+      APV->Gain = APV->PreviousGain;
+      if(APV->SubDet>2)BAD++;
+    }
+    if(APV->Gain<=0)           APV->Gain  = 1;
+    
+    delete Proj;
+  }printf("\n");
    
 }
 
@@ -275,6 +346,101 @@ SiStripApvGainInspector::checkBookAPVColls(const edm::EventSetup& es){
   bareTkGeomPtr_ = newBareTkGeomPtr;
 }
 
+void 
+SiStripApvGainInspector::storeOnTree(TFileService* tfs)
+{
+  unsigned int  tree_Index;
+  unsigned int  tree_Bin;
+  unsigned int  tree_DetId;
+  unsigned char tree_APVId;
+  unsigned char tree_SubDet;
+  float         tree_x;
+  float         tree_y;
+  float         tree_z;
+  float         tree_Eta;
+  float         tree_R;
+  float         tree_Phi;
+  float         tree_Thickness;
+  float         tree_FitMPV;
+  float         tree_FitMPVErr;
+  float         tree_FitWidth;
+  float         tree_FitWidthErr;
+  float         tree_FitChi2NDF;
+  float         tree_FitNorm;
+  double        tree_Gain;
+  double        tree_PrevGain;
+  double        tree_PrevGainTick;
+  double        tree_NEntries;
+  bool          tree_isMasked;
+  
+  TTree*         MyTree;
+  MyTree = tfs->make<TTree> ("APVGain","APVGain");
+  MyTree->Branch("Index"             ,&tree_Index      ,"Index/i");
+  MyTree->Branch("Bin"               ,&tree_Bin        ,"Bin/i");
+  MyTree->Branch("DetId"             ,&tree_DetId      ,"DetId/i");
+  MyTree->Branch("APVId"             ,&tree_APVId      ,"APVId/b");
+  MyTree->Branch("SubDet"            ,&tree_SubDet     ,"SubDet/b");
+  MyTree->Branch("x"                 ,&tree_x          ,"x/F"); 
+  MyTree->Branch("y"                 ,&tree_y          ,"y/F");   
+  MyTree->Branch("z"                 ,&tree_z          ,"z/F");   
+  MyTree->Branch("Eta"               ,&tree_Eta        ,"Eta/F");
+  MyTree->Branch("R"                 ,&tree_R          ,"R/F");
+  MyTree->Branch("Phi"               ,&tree_Phi        ,"Phi/F");
+  MyTree->Branch("Thickness"         ,&tree_Thickness  ,"Thickness/F");
+  MyTree->Branch("FitMPV"            ,&tree_FitMPV     ,"FitMPV/F");
+  MyTree->Branch("FitMPVErr"         ,&tree_FitMPVErr  ,"FitMPVErr/F");
+  MyTree->Branch("FitWidth"          ,&tree_FitWidth   ,"FitWidth/F");
+  MyTree->Branch("FitWidthErr"       ,&tree_FitWidthErr,"FitWidthErr/F");
+  MyTree->Branch("FitChi2NDF"        ,&tree_FitChi2NDF ,"FitChi2NDF/F");
+  MyTree->Branch("FitNorm"           ,&tree_FitNorm    ,"FitNorm/F");
+  MyTree->Branch("Gain"              ,&tree_Gain       ,"Gain/D");
+  MyTree->Branch("PrevGain"          ,&tree_PrevGain   ,"PrevGain/D");
+  MyTree->Branch("PrevGainTick"      ,&tree_PrevGainTick,"PrevGainTick/D");
+  MyTree->Branch("NEntries"          ,&tree_NEntries   ,"NEntries/D");
+  MyTree->Branch("isMasked"          ,&tree_isMasked   ,"isMasked/O");
+      
+  for(unsigned int a=0;a<APVsCollOrdered.size();a++){
+    std::shared_ptr<stAPVGain> APV = APVsCollOrdered[a];
+    if(APV==nullptr)continue;
+    //     printf(      "%i | %i | PreviousGain = %7.5f NewGain = %7.5f (#clusters=%8.0f)\n", APV->DetId,APV->APVId,APV->PreviousGain,APV->Gain, APV->NEntries);
+    //fprintf(Gains,"%i | %i | PreviousGain = %7.5f(tick) x %7.5f(particle) NewGain (particle) = %7.5f (#clusters=%8.0f)\n", APV->DetId,APV->APVId,APV->PreviousGainTick, APV->PreviousGain,APV->Gain, APV->NEntries);
+    
+    tree_Index      = APV->Index;
+    tree_Bin        = Charge_Vs_Index->GetXaxis()->FindBin(APV->Index);
+    tree_DetId      = APV->DetId;
+    tree_APVId      = APV->APVId;
+    tree_SubDet     = APV->SubDet;
+    tree_x          = APV->x;
+    tree_y          = APV->y;
+    tree_z          = APV->z;
+    tree_Eta        = APV->Eta;
+    tree_R          = APV->R;
+    tree_Phi        = APV->Phi;
+    tree_Thickness  = APV->Thickness;
+    tree_FitMPV     = APV->FitMPV;
+    tree_FitMPVErr  = APV->FitMPVErr;
+    tree_FitWidth   = APV->FitWidth;
+    tree_FitWidthErr= APV->FitWidthErr;
+    tree_FitChi2NDF = APV->FitChi2;
+    tree_FitNorm    = APV->FitNorm;
+    tree_Gain       = APV->Gain;
+    tree_PrevGain   = APV->PreviousGain;
+    tree_PrevGainTick  = APV->PreviousGainTick;
+    tree_NEntries   = APV->NEntries;
+    tree_isMasked   = APV->isMasked;
+
+    if(tree_DetId==402673324){
+      printf("%i | %i : %f --> %f  (%f)\n", tree_DetId, tree_APVId, tree_PrevGain, tree_Gain, tree_NEntries);
+    }
+    
+    
+    MyTree->Fill();
+  }
+}
+
+
+
+//********************************************************************************//
 void SiStripApvGainInspector::checkAndRetrieveTopology(const edm::EventSetup& setup) {
   if( !tTopo_ ) {
     edm::ESHandle<TrackerTopology> TopoHandle;
@@ -283,6 +449,42 @@ void SiStripApvGainInspector::checkAndRetrieveTopology(const edm::EventSetup& se
   }
 }
 
+//********************************************************************************//
+void 
+SiStripApvGainInspector::getPeakOfLandau(TH1* InputHisto, double* FitResults, double LowRange, double HighRange)
+{ 
+  FitResults[0]         = -0.5;  //MPV
+  FitResults[1]         =  0;    //MPV error
+  FitResults[2]         = -0.5;  //Width
+  FitResults[3]         =  0;    //Width error
+  FitResults[4]         = -0.5;  //Fit Chi2/NDF
+  FitResults[5]         = 0;     //Normalization
+  
+  if( InputHisto->GetEntries() < minNrEntries)return;
+  
+  // perform fit with standard landau
+  TF1 MyLandau("MyLandau","landau",LowRange, HighRange);
+  MyLandau.SetParameter(1,300);
+  InputHisto->Fit(&MyLandau,"0QR WW");
+  
+  // MPV is parameter 1 (0=constant, 1=MPV, 2=Sigma)
+  FitResults[0]         = MyLandau.GetParameter(1);  //MPV
+  FitResults[1]         = MyLandau.GetParError(1);   //MPV error
+  FitResults[2]         = MyLandau.GetParameter(2);  //Width
+  FitResults[3]         = MyLandau.GetParError(2);   //Width error
+  FitResults[4]         = MyLandau.GetChisquare() / MyLandau.GetNDF();  //Fit Chi2/NDF
+  FitResults[5]         = MyLandau.GetParameter(0);
+  
+}
+
+//********************************************************************************//
+bool 
+SiStripApvGainInspector::isGoodLandauFit(double* FitResults){
+  if(FitResults[0] <= 0             )return false;
+  //   if(FitResults[1] > MaxMPVError   )return false;
+  //   if(FitResults[4] > MaxChi2OverNDF)return false;
+  return true;   
+}
 
 
 // ------------ method called once each job just before starting event loop  ------------
@@ -295,6 +497,8 @@ SiStripApvGainInspector::beginJob()
 void
 SiStripApvGainInspector::endJob()
 {
+  tfs = edm::Service<TFileService>().operator->();
+  storeOnTree(tfs);
 }
 
 // ------------ method fills 'descriptions' with the allowed parameters for the module  ------------

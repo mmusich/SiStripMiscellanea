@@ -13,6 +13,13 @@ process.GlobalTag = GlobalTag(process.GlobalTag, '101X_dataRun2_Express_v7', '')
 
 process.load("Configuration.Geometry.GeometryRecoDB_cff")
 
+####################################################################
+# Output file
+####################################################################
+process.TFileService = cms.Service("TFileService",
+                                   fileName=cms.string("APVGainsTree.root")
+                                   )                                    
+
 process.demo = cms.EDAnalyzer('SiStripApvGainInspector',
                               inputFile = cms.untracked.string("/tmp/musich/CMSSW_10_1_5/src/SiStripMiscellanea/SiStripApvGainInspector/test/DQM_V0001_R000999999__StreamExpress__Run2018B-PromptCalibProdSiStripGainsAAG-Express-v1-317279-317340__ALCAPROMPT.root")
 )
