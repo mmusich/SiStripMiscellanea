@@ -3,7 +3,13 @@ import FWCore.ParameterSet.Config as cms
 process = cms.Process("Demo")
 process.load("FWCore.MessageService.MessageLogger_cfi")
 
-process.source = cms.Source("EmptySource")
+process.source = cms.Source("EmptyIOVSource",
+                            firstValue = cms.uint64(317340),
+                            lastValue  = cms.uint64(317340),
+                            timetype  = cms.string('runnumber'),
+                            interval = cms.uint64(1)
+                            )
+
 
 process.maxEvents = cms.untracked.PSet( input = cms.untracked.int32(1) )
 
@@ -21,7 +27,7 @@ process.TFileService = cms.Service("TFileService",
                                    )                                    
 
 process.demo = cms.EDAnalyzer('SiStripApvGainInspector',
-                              inputFile = cms.untracked.string("/tmp/musich/CMSSW_10_1_5/src/SiStripMiscellanea/SiStripApvGainInspector/test/DQM_V0001_R000999999__StreamExpress__Run2018B-PromptCalibProdSiStripGainsAAG-Express-v1-317279-317340__ALCAPROMPT.root")
+                              inputFile = cms.untracked.string("DQM_V0001_R000999999__StreamExpress__Run2018B-PromptCalibProdSiStripGainsAAG-Express-v1-317279-317340__ALCAPROMPT.root")
 )
 
 

@@ -33,6 +33,7 @@
 #include "Geometry/TrackerGeometryBuilder/interface/PixelGeomDetUnit.h"
 #include "Geometry/TrackerGeometryBuilder/interface/StripGeomDetUnit.h"
 #include "Geometry/TrackerNumberingBuilder/interface/GeometricDet.h"
+#include "CommonTools/TrackerMap/interface/TrackerMap.h"
 #include "FWCore/Framework/interface/ESHandle.h"
 #include "FWCore/Framework/interface/Event.h"
 #include "FWCore/Framework/interface/Frameworkfwd.h"
@@ -47,6 +48,7 @@
 #include "Geometry/Records/interface/TrackerDigiGeometryRecord.h"
 #include "FWCore/ServiceRegistry/interface/Service.h"
 #include "CommonTools/UtilAlgos/interface/TFileService.h"
+#include "CondTools/SiStrip/plugins/SiStripMiscalibrateHelper.cc"
 
 //
 // class declaration
@@ -56,6 +58,8 @@
 // the template argument to the base class so the class inherits
 // from  edm::one::EDAnalyzer<>
 // This will improve performance in multithreaded jobs.
+
+#include <math.h>       /* log */
 
 // ROOT includes
 #include "TFile.h"
@@ -108,6 +112,14 @@ class SiStripApvGainInspector : public edm::one::EDAnalyzer<edm::one::SharedReso
       TFile *fin;
       const std::string filename_;
       double minNrEntries;
+
+      std::unique_ptr<TrackerMap> ratio_map;
+      std::unique_ptr<TrackerMap> old_payload_map;
+      std::unique_ptr<TrackerMap> new_payload_map;
+      std::unique_ptr<TrackerMap> mpv_map;
+      std::unique_ptr<TrackerMap> mpv_err_map;
+      std::unique_ptr<TrackerMap> entries_map;
+      std::unique_ptr<TrackerMap> fitChi2_map;
 };
 
 //
@@ -132,6 +144,36 @@ SiStripApvGainInspector::SiStripApvGainInspector(const edm::ParameterSet& iConfi
    //now do what ever initialization is needed
   fin = TFile::Open(filename_.c_str(),"READ");
   Charge_Vs_Index = (TH2F*)fin->Get("DQMData/Run 999999/AlCaReco/Run summary/SiStripGainsAAG/Charge_Vs_Index_AagBunch");
+
+  ratio_map = std::unique_ptr<TrackerMap>(new TrackerMap("ratio"));
+  ratio_map->setTitle("Average by module of the G2 Gain payload ratio (new/old)");
+  ratio_map->setPalette(1);
+
+  new_payload_map =std::unique_ptr<TrackerMap>(new TrackerMap("new_payload"));
+  new_payload_map->setTitle("Tracker Map of Updated G2 Gain payload averaged by module");
+  new_payload_map->setPalette(1);
+  
+  old_payload_map =std::unique_ptr<TrackerMap>(new TrackerMap("old_payload"));
+  old_payload_map->setTitle("Tracker Map of Starting G2 Gain Payload averaged by module");
+  old_payload_map->setPalette(1);
+
+  // fit quality maps
+
+  mpv_map = std::unique_ptr<TrackerMap>(new TrackerMap("MPV"));
+  mpv_map->setTitle("Landau Fit MPV average value per module [ADC counts/mm]");
+  mpv_map->setPalette(1);
+
+  mpv_err_map =std::unique_ptr<TrackerMap>(new TrackerMap("MPVerr"));
+  mpv_err_map->setTitle("Landau Fit MPV average error per module [ADC counts/mm]");
+  mpv_err_map->setPalette(1);
+  
+  entries_map =std::unique_ptr<TrackerMap>(new TrackerMap("Entries"));
+  entries_map->setTitle("log_{10}(entries) average per module");
+  entries_map->setPalette(1);
+
+  fitChi2_map =std::unique_ptr<TrackerMap>(new TrackerMap("FitChi2"));
+  fitChi2_map->setTitle("log_{10}(Fit #chi^{2}/ndf) average per module");
+  fitChi2_map->setPalette(1);
 
 }
 
@@ -399,12 +441,25 @@ SiStripApvGainInspector::storeOnTree(TFileService* tfs)
   MyTree->Branch("NEntries"          ,&tree_NEntries   ,"NEntries/D");
   MyTree->Branch("isMasked"          ,&tree_isMasked   ,"isMasked/O");
       
+
+  uint32_t cachedId(0);
+  SiStripMiscalibrate::Entry gain_ratio;
+  SiStripMiscalibrate::Entry o_gain;
+  SiStripMiscalibrate::Entry n_gain;
+  SiStripMiscalibrate::Entry mpv;
+  SiStripMiscalibrate::Entry mpv_err;
+  SiStripMiscalibrate::Entry entries;
+  SiStripMiscalibrate::Entry fitChi2;
+
   for(unsigned int a=0;a<APVsCollOrdered.size();a++){
     std::shared_ptr<stAPVGain> APV = APVsCollOrdered[a];
     if(APV==nullptr)continue;
     //     printf(      "%i | %i | PreviousGain = %7.5f NewGain = %7.5f (#clusters=%8.0f)\n", APV->DetId,APV->APVId,APV->PreviousGain,APV->Gain, APV->NEntries);
     //fprintf(Gains,"%i | %i | PreviousGain = %7.5f(tick) x %7.5f(particle) NewGain (particle) = %7.5f (#clusters=%8.0f)\n", APV->DetId,APV->APVId,APV->PreviousGainTick, APV->PreviousGain,APV->Gain, APV->NEntries);
-    
+
+    // do not fill the Pixel
+    if(APV->SubDet==PixelSubdetector::PixelBarrel || APV->SubDet==PixelSubdetector::PixelEndcap) continue;
+
     tree_Index      = APV->Index;
     tree_Bin        = Charge_Vs_Index->GetXaxis()->FindBin(APV->Index);
     tree_DetId      = APV->DetId;
@@ -429,10 +484,48 @@ SiStripApvGainInspector::storeOnTree(TFileService* tfs)
     tree_NEntries   = APV->NEntries;
     tree_isMasked   = APV->isMasked;
 
+    // flush the counters
+    if(cachedId!=0 && tree_DetId!=cachedId){
+            
+      //ratio_map->fill(cachedId,gain_ratio.mean());
+      ratio_map->fill(cachedId,o_gain.mean()/n_gain.mean());
+      old_payload_map->fill(cachedId,o_gain.mean());
+      new_payload_map->fill(cachedId,n_gain.mean());
+     
+      if(entries.mean()>0){ 
+	mpv_map->fill(cachedId,mpv.mean());        	     
+	mpv_err_map->fill(cachedId,mpv_err.mean());
+	entries_map->fill(cachedId,log10(entries.mean()));
+	if(fitChi2.mean()>0) {
+	  fitChi2_map->fill(cachedId,log10(fitChi2.mean()));
+	} else {
+	  fitChi2_map->fill(cachedId,-1);
+	}
+      }
+
+      gain_ratio.reset();
+      o_gain.reset();
+      n_gain.reset();
+
+      mpv.reset();
+      mpv_err.reset();
+      entries.reset();
+      fitChi2.reset();
+
+    } 
+     
+    cachedId=tree_DetId;
+    gain_ratio.add(tree_PrevGain/tree_Gain);
+    o_gain.add(tree_PrevGain);
+    n_gain.add(tree_Gain);
+    mpv.add(tree_FitMPV);
+    mpv_err.add(tree_FitMPVErr);
+    entries.add(tree_NEntries);
+    fitChi2.add(tree_FitChi2NDF);
+
     if(tree_DetId==402673324){
       printf("%i | %i : %f --> %f  (%f)\n", tree_DetId, tree_APVId, tree_PrevGain, tree_Gain, tree_NEntries);
     }
-    
     
     MyTree->Fill();
   }
@@ -499,6 +592,34 @@ SiStripApvGainInspector::endJob()
 {
   tfs = edm::Service<TFileService>().operator->();
   storeOnTree(tfs);
+
+  auto range = SiStripMiscalibrate::getTruncatedRange(ratio_map.get());
+    
+  ratio_map->save(true,range.first,range.second,"G2_gain_ratio_map.pdf");
+  ratio_map->save(true,range.first,range.second,"G2_gain_ratio_map.png"); 
+
+  range = SiStripMiscalibrate::getTruncatedRange(old_payload_map.get());
+
+  old_payload_map->save(true,range.first,range.second,"starting_G2_gain_payload_map.pdf");
+  old_payload_map->save(true,range.first,range.second,"starting_G2_gain_payload_map.png");
+  
+  range = SiStripMiscalibrate::getTruncatedRange(new_payload_map.get());
+
+  new_payload_map->save(true,range.first,range.second,"new_G2_gain_payload_map.pdf");
+  new_payload_map->save(true,range.first,range.second,"new_G2_gain_payload_map.png");
+  
+  mpv_map->save(true,250,350.,"mpv_map.pdf");
+  mpv_map->save(true,250,350.,"mpv_map.png");
+    
+  mpv_err_map->save(true,0.,3.,"mpv_err_map.pdf");
+  mpv_err_map->save(true,0.,3.,"mpv_err_map.png");
+
+  entries_map->save(true,0,0,"entries_map.pdf");
+  entries_map->save(true,0,0,"entries_map.png");
+
+  fitChi2_map->save(true,0.,0.,"fitChi2_map.pdf");
+  fitChi2_map->save(true,0.,0.,"fitChi2_map.png");
+
 }
 
 // ------------ method fills 'descriptions' with the allowed parameters for the module  ------------
