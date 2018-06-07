@@ -62,6 +62,8 @@
 #include <math.h>       /* log */
 
 // ROOT includes
+#include "TStyle.h"
+#include "TCanvas.h"
 #include "TFile.h"
 #include "TTree.h"
 #include "TH1F.h"
@@ -89,10 +91,14 @@ class SiStripApvGainInspector : public edm::one::EDAnalyzer<edm::one::SharedReso
       bool isGoodLandauFit(double* FitResults);
       void getPeakOfLandau(TH1* InputHisto, double* FitResults, double LowRange=50, double HighRange=5400);
       void storeOnTree(TFileService* tfs);
+      void makeNicePlotStyle(TH1F* plot);
 
       // ----------member data ---------------------------
 
       TFileService *tfs;
+  
+      // map the APV ids to the charge plots
+      std::map<std::pair<unsigned char,uint32_t>,TH1F*> histoMap_; 
 
       edm::ESHandle<TrackerGeometry> tkGeom_;
       const TrackerGeometry *bareTkGeomPtr_;  // ugly hack to fill APV colls only once, but checks
@@ -112,6 +118,7 @@ class SiStripApvGainInspector : public edm::one::EDAnalyzer<edm::one::SharedReso
       TFile *fin;
       const std::string filename_;
       double minNrEntries;
+      std::vector<unsigned int> wantedmods;
 
       std::unique_ptr<TrackerMap> ratio_map;
       std::unique_ptr<TrackerMap> old_payload_map;
@@ -139,9 +146,19 @@ SiStripApvGainInspector::SiStripApvGainInspector(const edm::ParameterSet& iConfi
   GOOD(0),
   BAD(0),
   filename_(iConfig.getUntrackedParameter<std::string> ("inputFile")),
-  minNrEntries(iConfig.getUntrackedParameter<double> ("minNrEntries",20))
+  minNrEntries(iConfig.getUntrackedParameter<double> ("minNrEntries",20)),
+  wantedmods(iConfig.getUntrackedParameter<std::vector<unsigned int> >("selectedModules"))
 {
-   //now do what ever initialization is needed
+
+  
+  sort(wantedmods.begin(),wantedmods.end());
+
+  edm::LogInfo("SelectedModules") << "Selected module list";
+  for(std::vector<unsigned int>::const_iterator mod = wantedmods.begin();mod!=wantedmods.end();mod++) {
+    edm::LogVerbatim("SelectedModules") << *mod ;
+  }
+
+  //now do what ever initialization is needed
   fin = TFile::Open(filename_.c_str(),"READ");
   Charge_Vs_Index = (TH2F*)fin->Get("DQMData/Run 999999/AlCaReco/Run summary/SiStripGainsAAG/Charge_Vs_Index_AagBunch");
 
@@ -202,7 +219,7 @@ SiStripApvGainInspector::analyze(const edm::Event& iEvent, const edm::EventSetup
    
    edm::ESHandle<SiStripGain> gainHandle;
    iSetup.get<SiStripGainRcd>().get(gainHandle);
-   if(!gainHandle.isValid()){edm::LogError("SiStripGainPCLHarvester")<< "gainHandle is not valid\n"; exit(0);}
+   if(!gainHandle.isValid()){edm::LogError("SiStripApvGainInspector")<< "gainHandle is not valid\n"; exit(0);}
 
    edm::ESHandle<SiStripQuality> SiStripQuality_;
    iSetup.get<SiStripQualityRcd>().get(SiStripQuality_);
@@ -215,14 +232,14 @@ SiStripApvGainInspector::analyze(const edm::Event& iEvent, const edm::EventSetup
      
      APV->isMasked      = SiStripQuality_->IsApvBad(APV->DetId,APV->APVId);
     	  
-     if(gainHandle->getNumberOfTags()!=2){edm::LogError("SiStripGainPCLHarvester")<< "NUMBER OF GAIN TAG IS EXPECTED TO BE 2\n";fflush(stdout);exit(0);};		   
+     if(gainHandle->getNumberOfTags()!=2){edm::LogError("SiStripApvGainInspector")<< "NUMBER OF GAIN TAG IS EXPECTED TO BE 2\n";fflush(stdout);exit(0);};		   
      float newPreviousGain = gainHandle->getApvGain(APV->APVId,gainHandle->getRange(APV->DetId, 1),1);
-     if(APV->PreviousGain!=1 and newPreviousGain!=APV->PreviousGain)edm::LogWarning("SiStripGainPCLHarvester")<< "WARNING: ParticleGain in the global tag changed\n";
+     if(APV->PreviousGain!=1 and newPreviousGain!=APV->PreviousGain)edm::LogWarning("SiStripApvGainInspector")<< "WARNING: ParticleGain in the global tag changed\n";
      APV->PreviousGain = newPreviousGain;
      
      float newPreviousGainTick = gainHandle->getApvGain(APV->APVId,gainHandle->getRange(APV->DetId, 0),0);
      if(APV->PreviousGainTick!=1 and newPreviousGainTick!=APV->PreviousGainTick){
-       edm::LogWarning("SiStripGainPCLHarvester")<< "WARNING: TickMarkGain in the global tag changed\n"<< std::endl
+       edm::LogWarning("SiStripApvGainInspector")<< "WARNING: TickMarkGain in the global tag changed\n"<< std::endl
 						 <<" APV->SubDet: "<< APV->SubDet << " APV->APVId:" << APV->APVId << std::endl
 						 <<" APV->PreviousGainTick: "<<APV->PreviousGainTick<<" newPreviousGainTick: "<<newPreviousGainTick<<std::endl;
     }
@@ -260,7 +277,14 @@ SiStripApvGainInspector::analyze(const edm::Event& iEvent, const edm::EventSetup
     APV->FitChi2     = FitResults[4];
     APV->FitNorm     = FitResults[5];
     APV->NEntries    = Proj->GetEntries();
-    
+
+    for(const auto &mod : wantedmods) {
+      if(mod == APV->DetId) {
+	edm::LogInfo("ModuleFound") << " module " << mod << " found! Storing... " << std::endl;
+	histoMap_[std::make_pair(APV->APVId,APV->DetId)] = (TH1F*)Proj->Clone(Form("hClone_%s",Proj->GetName()));
+      }
+    }
+
     if(isGoodLandauFit(FitResults)){
       APV->Gain = APV->FitMPV / MPVmean;
       if(APV->SubDet>2)GOOD++;
@@ -558,7 +582,7 @@ SiStripApvGainInspector::getPeakOfLandau(TH1* InputHisto, double* FitResults, do
   // perform fit with standard landau
   TF1 MyLandau("MyLandau","landau",LowRange, HighRange);
   MyLandau.SetParameter(1,300);
-  InputHisto->Fit(&MyLandau,"0QR WW");
+  InputHisto->Fit(&MyLandau,"QR WW");
   
   // MPV is parameter 1 (0=constant, 1=MPV, 2=Sigma)
   FitResults[0]         = MyLandau.GetParameter(1);  //MPV
@@ -579,6 +603,24 @@ SiStripApvGainInspector::isGoodLandauFit(double* FitResults){
   return true;   
 }
 
+/*--------------------------------------------------------------------*/
+void SiStripApvGainInspector::makeNicePlotStyle(TH1F* plot)
+/*--------------------------------------------------------------------*/
+{ 
+  plot->GetXaxis()->CenterTitle(true);
+  plot->GetYaxis()->CenterTitle(true);
+  plot->GetXaxis()->SetTitleFont(42); 
+  plot->GetYaxis()->SetTitleFont(42);  
+  plot->GetXaxis()->SetTitleSize(0.05);
+  plot->GetYaxis()->SetTitleSize(0.05);
+  plot->GetXaxis()->SetTitleOffset(0.9);
+  plot->GetYaxis()->SetTitleOffset(1.3);
+  plot->GetXaxis()->SetLabelFont(42);
+  plot->GetYaxis()->SetLabelFont(42);
+  plot->GetYaxis()->SetLabelSize(.05);
+  plot->GetXaxis()->SetLabelSize(.05);
+}
+
 
 // ------------ method called once each job just before starting event loop  ------------
 void
@@ -590,6 +632,31 @@ SiStripApvGainInspector::beginJob()
 void
 SiStripApvGainInspector::endJob()
 {
+
+  edm::LogVerbatim("SelectedModules") <<"Selected APVs:" << histoMap_.size() << std::endl; 
+  for(const auto &plot : histoMap_){
+    TCanvas *c1 = new TCanvas(Form("c1_%i_%i",plot.first.second,plot.first.first),Form("c1_%i_%i",plot.first.second,plot.first.first),800,600);
+    // Define common things for the different fits
+  
+    gStyle->SetOptFit(1011);
+    c1->Clear();
+
+    c1->SetLeftMargin(0.15);
+    c1->SetRightMargin(0.10);
+    plot.second->SetTitle(Form("Cluster Charge (%i,%i)",plot.first.second,plot.first.first));
+    plot.second->GetXaxis()->SetTitle("Normalized Cluster Charge [ADC counts/mm]");
+    plot.second->GetYaxis()->SetTitle("On-track clusters");
+    plot.second->GetXaxis()->SetRangeUser(0.,1000.);
+
+    this->makeNicePlotStyle(plot.second);
+    plot.second->Draw();
+    edm::LogVerbatim("SelectedModules") <<" DetId: " << plot.first.second << " ("<< plot.first.first << ")"<< std::endl; ;
+
+    c1->Print(Form("c1_%i_%i.png",plot.first.second,plot.first.first));
+    c1->Print(Form("c1_%i_%i.pdf",plot.first.second,plot.first.first));
+  }
+
+
   tfs = edm::Service<TFileService>().operator->();
   storeOnTree(tfs);
 
