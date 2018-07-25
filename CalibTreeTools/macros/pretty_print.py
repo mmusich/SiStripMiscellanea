@@ -31,7 +31,9 @@ treeIndex=0
 for tree in (data[0]["Trees"]):
     print "======>",tree["Name"],tree["Size"]
 
-    tree2 = data2[0]["Trees"][treeIndex]
+    for tt in (data2[0]["Trees"]):
+        if(tt["Name"]==tree["Name"]):
+            tree2 = tt
 
     c1 = TCanvas('c1'+tree["Name"], 'Histogram Drawing Options',1000,800)
     c1.SetBottomMargin(0.32)
