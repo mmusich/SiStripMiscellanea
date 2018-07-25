@@ -1,4 +1,4 @@
-import json
+import json, os, sys
 from pprint import pprint
 from ROOT import TCanvas, TPad, TFile, TPaveLabel, TPaveText, TH1F, TLegend, TString
 from ROOT import gROOT
@@ -21,10 +21,18 @@ def makeNicePlot(hist):
     hist.GetXaxis().SetLabelSize(0.03);
     hist.GetYaxis().SetLabelFont(42);
  
-json_data=open("output_new.json").read()
+################################################################
+if len(sys.argv) < 3:
+  print "Error, expecting 2 arguments (two input json files)!"
+  sys.exit()
+
+oldInputFile     = sys.argv[2]
+newInputFile     = sys.argv[1]
+
+json_data=open(newInputFile).read()
 data = json.loads(json_data)
 
-json_data2=open("output_old.json").read()
+json_data2=open(oldInputFile).read()
 data2 = json.loads(json_data2)
 
 treeIndex=0
