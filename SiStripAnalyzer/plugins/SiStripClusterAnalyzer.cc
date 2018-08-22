@@ -1,9 +1,9 @@
 // -*- C++ -*-
 //
-// Package:    CalibTracker/SiStripAnalyzer
-// Class:      SiStripAnalyzer
+// Package:    CalibTracker/SiStripClusterAnalyzer
+// Class:      SiStripClusterAnalyzer
 // 
-/**\class SiStripAnalyzer SiStripAnalyzer.cc CalibTracker/SiStripAnalyzer/plugins/SiStripAnalyzer.cc
+/**\class SiStripClusterAnalyzer SiStripClusterAnalyzer.cc CalibTracker/SiStripAnalyzer/plugins/SiStripClusterAnalyzer.cc
 
  Description: [one line class summary]
 
@@ -35,6 +35,7 @@
 #include "FWCore/ServiceRegistry/interface/Service.h"
 #include "FWCore/Framework/interface/ESHandle.h"
 
+#include "CondTools/SiStrip/plugins/SiStripMiscalibrateHelper.cc"
 #include "RecoLocalTracker/SiStripClusterizer/interface/SiStripClusterInfo.h"
 #include "TrackingTools/PatternTools/interface/Trajectory.h"
 #include "TrackingTools/PatternTools/interface/TrajTrackAssociation.h"
@@ -137,11 +138,9 @@ namespace SiStripHelper {
 	      NUM_OF_TYPES=23,
   };
 
+  TF1 * f2 = NULL;
+  TF1 * f3 = NULL;
 }
-
-
-TF1 * f2 = NULL;
-TF1 * f3 = NULL;
 
 //
 // class declaration
@@ -153,10 +152,10 @@ TF1 * f3 = NULL;
 // constructor "usesResource("TFileService");"
 // This will improve performance in multithreaded jobs.
 
-class SiStripAnalyzer : public edm::one::EDAnalyzer<edm::one::SharedResources>  {
+class SiStripClusterAnalyzer : public edm::one::EDAnalyzer<edm::one::SharedResources>  {
    public:
-      explicit SiStripAnalyzer(const edm::ParameterSet&);
-      ~SiStripAnalyzer();
+      explicit SiStripClusterAnalyzer(const edm::ParameterSet&);
+      ~SiStripClusterAnalyzer();
 
       static void fillDescriptions(edm::ConfigurationDescriptions& descriptions);
 
@@ -169,6 +168,7 @@ class SiStripAnalyzer : public edm::one::EDAnalyzer<edm::one::SharedResources>  
       bool   IsFarFromBorder(TrajectoryStateOnSurface* trajState, const uint32_t detid, const edm::EventSetup* iSetup);
       int checkLayer( unsigned int iidd, const TrackerTopology* tTopo); 
       std::string getStringFromEnum(SiStripHelper::layer e);
+      template <class OBJECT_TYPE> int GetIndex(const std::vector<OBJECT_TYPE*>& vec, const TString& name);
       std::string myreplace(const std::string &s,const std::string &toReplace,const std::string &replaceWith);
       void fitStoN(TH1F *hist);
       static Double_t function_sum(Double_t *x, Double_t *par);
@@ -177,6 +177,7 @@ class SiStripAnalyzer : public edm::one::EDAnalyzer<edm::one::SharedResources>  
       edm::EDGetTokenT< LumiScalersCollection > scalerToken_; 
       edm::EDGetTokenT< edm::View<reco::Track> > tracks_token_;
       edm::EDGetTokenT< TrajTrackAssociationCollection > association_token_;
+      edm::FileInPath gfp_;          /*!< File Path for the ideal geometry. */ 
 
       // ----------member data ---------------------------
 
@@ -218,14 +219,39 @@ class SiStripAnalyzer : public edm::one::EDAnalyzer<edm::one::SharedResources>  
       TProfile* p_nUsedClust_per_LS;
       TProfile* p_nUsedClust_vs_lumi;
 
+      TProfile* p_clusterWitdh_vs_Layer;
+
       TH1F*     h_nClusters;
       TH1F*     h_nUsedClusters;
       TH1I*     h_events_per_bx; 
       TH1F*     h_CChargeOverPath;
+      TH1I*     h_CCharge;
+      TH1I*     h_SeedCharge;
+      TH1I*     h_SingleStripCharge;  
+      TH1F*     h_SeedNoise;
+      TH1F*     h_SeedGain;
+
       TH1F*     h_StoN;
+      TH1F*     h_Noise;
       TH1F*     h_StoNCorr;
-      std::map<SiStripHelper::layer,TH1F*>  h_StoN_layer;
-      std::map<SiStripHelper::layer,TH1F*>  h_StoNCorr_layer;
+      TH1F*     h_ClusterWidth;
+
+      std::vector<TH1*> vTrackHistos_;
+
+      // std::map<SiStripHelper::layer,TH1F*>  h_StoN_layer;
+      // std::map<SiStripHelper::layer,TH1F*>  h_Noise_layer;
+      // std::map<SiStripHelper::layer,TH1F*>  h_StoNCorr_layer;
+      // std::map<SiStripHelper::layer,TH1F*>  h_CCOverP_layer;
+      // std::map<SiStripHelper::layer,TH1F*>  h_ClusterWidth_layer;
+
+      std::map<sistripsummary::TrackerRegion,TH1F*>  h_StoN_region;	    
+      std::map<sistripsummary::TrackerRegion,TH1F*>  h_Noise_region;	    
+      std::map<sistripsummary::TrackerRegion,TH1F*>  h_StoNCorr_region;    
+      std::map<sistripsummary::TrackerRegion,TH1F*>  h_CCOverP_region;	    
+      std::map<sistripsummary::TrackerRegion,TH1F*>  h_ClusterWidth_region;
+      std::map<sistripsummary::TrackerRegion,TH1I*>  h_SeedCharge_region;
+      std::map<sistripsummary::TrackerRegion,TH1I*>  h_SingleStripCharge_region;
+
 };
 
 //
@@ -239,8 +265,8 @@ class SiStripAnalyzer : public edm::one::EDAnalyzer<edm::one::SharedResources>  
 //
 // constructors and destructor
 //
-SiStripAnalyzer::SiStripAnalyzer(const edm::ParameterSet& iConfig)
-
+SiStripClusterAnalyzer::SiStripClusterAnalyzer(const edm::ParameterSet& iConfig):
+  gfp_(iConfig.getUntrackedParameter<edm::FileInPath>("geoFile",edm::FileInPath("CalibTracker/SiStripCommon/data/SiStripDetInfo.dat")))
 {
    //now do what ever initialization is needed
    usesResource("TFileService");
@@ -260,13 +286,14 @@ SiStripAnalyzer::SiStripAnalyzer(const edm::ParameterSet& iConfig)
    AllowSaturation         = iConfig.getUntrackedParameter<bool>    ("AllowSaturation"      , false);
    m_verbose_fit           = iConfig.getParameter<bool>("verbose_fit");
 
-   // cluster quality conditions
+   // // cluster quality conditions
    // edm::ParameterSet cluster_condition = iConfig.getParameter<edm::ParameterSet>("ClusterConditions");
    // applyClusterQuality_ = cluster_condition.getParameter<bool>("On");
    // sToNLowerLimit_      = cluster_condition.getParameter<double>("minStoN");
    // sToNUpperLimit_      = cluster_condition.getParameter<double>("maxStoN");
    // widthLowerLimit_     = cluster_condition.getParameter<double>("minWidth");
    // widthUpperLimit_     = cluster_condition.getParameter<double>("maxWidth");
+
 
    maxLS=-999; 
    maxBx=-999;
@@ -275,7 +302,7 @@ SiStripAnalyzer::SiStripAnalyzer(const edm::ParameterSet& iConfig)
 }
 
 
-SiStripAnalyzer::~SiStripAnalyzer()
+SiStripClusterAnalyzer::~SiStripClusterAnalyzer()
 {
  
    // do anything here that needs to be done at desctruction time
@@ -290,7 +317,7 @@ SiStripAnalyzer::~SiStripAnalyzer()
 
 // ------------ method called for each event  ------------
 void
-SiStripAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup)
+SiStripClusterAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup)
 {
   using namespace edm;
   
@@ -307,7 +334,7 @@ SiStripAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup
       PU_       = lumiScalers->begin()->pileup();
     }
   } else {
-    edm::LogInfo("SiStripAnalyzer") 
+    edm::LogInfo("SiStripClusterAnalyzer") 
       << "LumiScalers collection not found in the event; will write dummy values";
   }
   
@@ -359,8 +386,8 @@ SiStripAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup
     double	   tracketaerr      = track->etaError();         
     double	   trackdxy         = track->dxy();              
     double	   trackdxyerr      = track->dxyError();         
-    double	   trackdsz         = track->dsz();              
-    double	   trackdszerr      = track->dszError();         
+    double	   trackdz          = track->dz();              
+    double	   trackdzerr       = track->dzError();           
     double	   trackqoverp      = track->qoverp();           
     double	   trackqoverperr   = track->qoverpError();      
     double	   trackvx          = track->vx();               
@@ -368,6 +395,79 @@ SiStripAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup
     double	   trackvz          = track->vz();               
     int            trackalgo        = (int)track->algo();
     
+    // fill control plots
+    static const int chi2index = this->GetIndex(vTrackHistos_,"h_chi2");
+    vTrackHistos_[chi2index]->Fill(trackchi2);
+    
+    static const int ndofindex = this->GetIndex(vTrackHistos_,"h_trackndof");
+    vTrackHistos_[ndofindex]->Fill(trackndof);
+    
+    static const int chargeindex = this->GetIndex(vTrackHistos_,"h_trackcharge");
+    vTrackHistos_[chargeindex]->Fill(trackcharge);
+
+    static const int thetaindex = this->GetIndex(vTrackHistos_,"h_tracktheta");
+    vTrackHistos_[thetaindex]->Fill(tracktheta);
+
+    static const int dxyindex = this->GetIndex(vTrackHistos_,"h_trackdxy");
+    vTrackHistos_[dxyindex]->Fill(trackdxy);
+
+    static const int dzindex = this->GetIndex(vTrackHistos_,"h_trackdz");
+    vTrackHistos_[dzindex]->Fill(trackdz);
+
+    static const int dxyerrindex = this->GetIndex(vTrackHistos_,"h_trackdxyerr");
+    vTrackHistos_[dxyerrindex]->Fill(trackdxyerr);
+
+    static const int dzerrindex = this->GetIndex(vTrackHistos_,"h_trackdzerr");
+    vTrackHistos_[dzerrindex]->Fill(trackdzerr);
+    
+    static const int vxindex = this->GetIndex(vTrackHistos_,"h_trackvx");
+    vTrackHistos_[vxindex]->Fill(trackvx);
+
+    static const int vyindex = this->GetIndex(vTrackHistos_,"h_trackvy");
+    vTrackHistos_[vyindex]->Fill(trackvy);
+
+    static const int vzindex = this->GetIndex(vTrackHistos_,"h_trackvz");
+    vTrackHistos_[vzindex]->Fill(trackvz);
+
+    static const int thetaerrindex = this->GetIndex(vTrackHistos_,"h_trackthetaerr");
+    vTrackHistos_[thetaerrindex]->Fill(trackthetaerr);
+
+    static const int phierrindex = this->GetIndex(vTrackHistos_,"h_trackphierr");
+    vTrackHistos_[phierrindex]->Fill(trackphierr);
+
+    static const int kappaerrindex = this->GetIndex(vTrackHistos_,"h_curvatureerr");
+    vTrackHistos_[kappaerrindex]->Fill(trackqoverperr);
+
+    static const int algoindex = this->GetIndex(vTrackHistos_,"h_trackalgo");
+    vTrackHistos_[algoindex]->Fill(trackalgo);
+   
+    static const int normchi2index = this->GetIndex(vTrackHistos_,"h_normchi2");
+    vTrackHistos_[normchi2index]->Fill(trackchi2ndof);
+    static const int ptindex = this->GetIndex(vTrackHistos_,"h_pt");
+    if (trackpterr != 0.) {
+      static const int ptResolutionindex = this->GetIndex(vTrackHistos_,"h_ptResolution");
+      vTrackHistos_[ptResolutionindex]->Fill(trackpterr/trackpt);
+    }
+    vTrackHistos_[ptindex]->Fill(trackpt);
+
+    static const int etaindex = this->GetIndex(vTrackHistos_,"h_tracketa");
+    vTrackHistos_[etaindex]->Fill(tracketa);
+
+    static const int etaerrindex = this->GetIndex(vTrackHistos_,"h_tracketaerr");
+    vTrackHistos_[etaerrindex]->Fill(tracketaerr);
+
+    static const int phiindex = this->GetIndex(vTrackHistos_,"h_trackphi");
+    vTrackHistos_[phiindex]->Fill(trackphi);
+
+    static const int numOfValidHitsindex = this->GetIndex(vTrackHistos_,"h_trackNumberOfValidHits");
+    vTrackHistos_[numOfValidHitsindex]->Fill(trackhitsvalid);
+
+    static const int numOfLostHitsindex = this->GetIndex(vTrackHistos_,"h_trackNumberOfLostHits");
+    vTrackHistos_[numOfLostHitsindex]->Fill(trackhitslost);
+
+    static const int kappaindex = this->GetIndex(vTrackHistos_,"h_curvature");
+    vTrackHistos_[kappaindex]->Fill(trackqoverp);
+
     std::vector<TrajectoryMeasurement> measurements = traj->measurements();
     for(std::vector<TrajectoryMeasurement>::const_iterator measurement_it = measurements.begin(); measurement_it!=measurements.end(); measurement_it++){
       TrajectoryStateOnSurface trajState = measurement_it->updatedState();
@@ -381,7 +481,8 @@ SiStripAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup
       
       const uint32_t& detid = hit->geographicalId().rawId();
       //      SiStripHelper::layers layer = static_cast<std::underlying_type_t<SiStripHelper::layers>>(checkLayer(detid,tTopo)); 
-      auto layer = checkLayer(detid,tTopo);
+      auto layer  = checkLayer(detid,tTopo);
+      auto regions = SiStripMiscalibrate::getRegionsFromDetId(tTopo,detid); 
 
       const SiPixelCluster*   PixelCluster = NULL;
       const SiStripCluster*   StripCluster = NULL;
@@ -438,20 +539,49 @@ SiStripAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup
 	  uint16_t charge   = SiStripClusterInfo_.charge();
 	  uint16_t width    = SiStripClusterInfo_.width();
 	  float position    = SiStripClusterInfo_.baryStrip();
+	  
+	  uint16_t seedcharge = SiStripClusterInfo_.maxCharge();
+	  float seednoise     = SiStripClusterInfo_.stripNoisesRescaledByGain().at(SiStripClusterInfo_.maxIndex());
+	  float seednoisepure = SiStripClusterInfo_.stripNoises().at(SiStripClusterInfo_.maxIndex());
+	  float seedgain      = SiStripClusterInfo_.stripGains().at(SiStripClusterInfo_.maxIndex());
+	  
+	  h_CCharge->Fill(charge);
+	  h_SeedCharge->Fill(seedcharge);
+	  h_SeedNoise->Fill(seednoise);
+	  h_SeedGain->Fill(seedgain);
 
 	  h_StoN->Fill(StoN);
 	  h_StoNCorr->Fill(StoN*cosRZ);
+	  h_ClusterWidth->Fill(width);
+	  h_Noise->Fill(noise);
+	  
+	  p_clusterWitdh_vs_Layer->Fill(layer,width);
 
-	  // if( (applyClusterQuality_) &&
-	  //     (SiStripClusterInfo_.signalOverNoise() > sToNLowerLimit_ &&
-	  //      SiStripClusterInfo_.signalOverNoise() < sToNUpperLimit_ &&
-	  //      SiStripClusterInfo_.width() > widthLowerLimit_ &&
-	  //      SiStripClusterInfo_.width() < widthUpperLimit_) ) { 
+	  for(unsigned int a=0;a<Ampls.size();a++){               
+	    h_SingleStripCharge->Fill(Ampls[a]);
+	  }
+
+	  //if( (applyClusterQuality_) &&
+	  //      (SiStripClusterInfo_.signalOverNoise() > sToNLowerLimit_ &&
+	  // SiStripClusterInfo_.signalOverNoise() < sToNUpperLimit_ &&
+	  // SiStripClusterInfo_.width() > widthLowerLimit_ &&
+	  // SiStripClusterInfo_.width() < widthUpperLimit_) ) { 
 	 
-	  h_StoN_layer[static_cast<SiStripHelper::layer>(layer)]->Fill(StoN); 
-	  h_StoNCorr_layer[static_cast<SiStripHelper::layer>(layer)]->Fill(StoN*cosRZ);
-	  // }	  
+	  for (unsigned int j=0; j<regions.size();j++){
 
+	    h_StoN_region[regions[j]]->Fill(StoN); 
+	    h_StoNCorr_region[regions[j]]->Fill(StoN*cosRZ);
+	    h_ClusterWidth_region[regions[j]]->Fill(width);
+	    h_Noise_region[regions[j]]->Fill(noise);
+	    h_SeedCharge_region[regions[j]]->Fill(seedcharge);
+	    
+	    for(unsigned int a=0;a<Ampls.size();a++){               
+	      h_SingleStripCharge_region[regions[j]]->Fill(Ampls[a]);
+	    }
+	  }
+
+	  // }	  
+	  
 	  /*
 	    if(gainHandle.isValid()){ 
 	    PrevGain     =  gainHandle->getApvGain(APVId,gainHandle->getRange(DetId, 1),1); 
@@ -465,6 +595,11 @@ SiStripAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup
 	    amplitude.push_back( Ampls[a] );
 	  }
 	  
+	  double ChargeOverPath = (double)Charge / Path ;
+	  for (unsigned int j=0; j<regions.size();j++){
+	    h_CCOverP_region[regions[j]]->Fill(ChargeOverPath);
+	  }
+
 	  if(FirstStrip==0                                  )Overlapping=true;
 	  if(FirstStrip==128                                )Overlapping=true;
 	  if(FirstStrip==256                                )Overlapping=true;
@@ -501,9 +636,7 @@ SiStripAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup
 	  if(Overlapping     == true                )continue;
 	  if(Saturation      && !AllowSaturation    )continue;
 	  if(NStrips         >  MaxNrStrips         )continue;
-	  
-	  double ChargeOverPath = (double)Charge / Path ;
-	  
+	  	  
 	  nUsedStripClus++;
 	  h_CChargeOverPath->Fill(ChargeOverPath);
 	  
@@ -543,29 +676,67 @@ SiStripAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup
 
 // ------------ method called once each job just before starting event loop  ------------
 void 
-SiStripAnalyzer::beginJob()
+SiStripClusterAnalyzer::beginJob()
 {
   TH1F::SetDefaultSumw2(kTRUE);
   p_instlumi_per_bx = fs->make<TProfile>("instlumi_per_bx","instantaneous lumi per bx",3500,-0.5,3495.);
   p_PU_per_bx       = fs->make<TProfile>("PU_per_bx","PU per bx",3500,-0.5,3495.);
   h_events_per_bx   = fs->make<TH1I>("events_per_bx","events per bx",3500,-0.5,3495.);
   p_lumiVsLS_       = fs->make<TProfile>("lumiVsLS","scal lumi vs LS;LS;scal inst lumi E30 [Hz cm^{-2}]",2500,0,2500); 	
-  h_CChargeOverPath = fs->make<TH1F>("clusterChargeOverPath","cluster charge over path;cluster charge / path;# clusters",100,0.,1000.);
+  h_CChargeOverPath = fs->make<TH1F>("clusterChargeOverPath","cluster charge over path;cluster charge / path;# clusters",150,0.,1500.);
+
+  h_CCharge         = fs->make<TH1I>("clusterCharge","cluster charge;cluster charge [ADC counts]",100,0,500);
+  h_SeedCharge      = fs->make<TH1I>("seedCharge","cluster seed charge;cluster seed charge [ADC counts]",256,0,256);
+  h_SingleStripCharge = fs->make<TH1I>("signleStripCharge","single strip charge;single strip charge [ADC counts]",256,0,256);
+  h_SeedNoise       = fs->make<TH1F>("seedNoise","cluster seed noise;cluster seed noise [ADC counts]",100,0.,10.);
+  h_SeedGain        = fs->make<TH1F>("seedGain","cluster seed gain;cluster seed gain",100,0.,2.);
 
   h_StoN            = fs->make<TH1F>("clusterStoN","cluster Raw S/N;cluster raw S/N;# clusters",100,0.,100.);
-  h_StoNCorr        = fs->make<TH1F>("clusterStoNCorr","cluster S/N corrected for path lenght;cluster S/N;# clusters",100,0.,100.);
+  h_Noise           = fs->make<TH1F>("clusterNoise","cluster Noise;cluster Noise [ADC counts];# clusters",100,0.,10.);
+  h_StoNCorr        = fs->make<TH1F>("clusterStoNCorr","cluster S/N corrected for path length;cluster S/N;# clusters",100,0.,100.);
 
+  h_ClusterWidth    = fs->make<TH1F>("clusterWidth","cluster width;cluster witdh;# clusters",20,-0.5,19.5);
+
+  p_clusterWitdh_vs_Layer = fs->make<TProfile>("clusterWidthPerLayer","Tracker Layer;Average Cluster width",22,0.5,22.5);
   for ( int fooInt = SiStripHelper::TIBL1; fooInt != SiStripHelper::NUM_OF_TYPES; fooInt++ ){
     SiStripHelper::layer layer = static_cast<SiStripHelper::layer>(fooInt);
     std::string s_layer = getStringFromEnum(layer);
-    std::string append = myreplace(s_layer," ","_");
+    p_clusterWitdh_vs_Layer->GetXaxis()->SetBinLabel(fooInt,s_layer.c_str());
+  }
 
-    h_StoN_layer[layer]     = fs->make<TH1F>(Form("clusterStoN_%s",append.c_str()),Form("cluster Raw S/N (%s); %s cluster raw S/N;# clusters",s_layer.c_str(),s_layer.c_str()),100,0.,100.);
-    h_StoNCorr_layer[layer] = fs->make<TH1F>(Form("clusterStoNCorr_%s",append.c_str()),Form("cluster S/N (%s) corrected for path lenght;%s cluster S/N;# clusters",s_layer.c_str(),s_layer.c_str()),100,0.,100.);
-  }  
+  std::vector<std::string> parts = { "Tracker","TIB" ,"TIB_1" ,"TIB_2" ,"TIB_3" ,"TIB_4"  ,"TID"    ,"TIDP"   ,"TIDP_1" ,"TIDP_2" ,"TIDP_3" ,"TIDM"   ,"TIDM_1" ,"TIDM_2" ,"TIDM_3" ,"TOB"    ,"TOB_1"  ,"TOB_2"  ,"TOB_3"  ,"TOB_4"  ,"TOB_5"  ,"TOB_6"  ,"TEC"    ,"TECP"   ,"TECP_1" ,"TECP_2" ,"TECP_3" ,"TECP_4" ,"TECP_5" ,"TECP_6" ,"TECP_7" ,"TECP_8" ,"TECP_9" ,"TECM"   ,"TECM_1" ,"TECM_2" ,"TECM_3" ,"TECM_4" ,"TECM_5" ,"TECM_6" ,"TECM_7" ,"TECM_8" ,"TECM_9"}; 
 
-  h_nClusters       = fs->make<TH1F>("nStripClusters","n. of Strip clusters;n. Strip clusters; events",5000,0.,5000.);
-  h_nUsedClusters   = fs->make<TH1F>("nUsedStripClusters","n. of selected Strip clusters;n. selected Strip clusters; events",2000,0.,2000.);
+  for(const auto &part : parts){
+    std::string append = part; //myreplace(part,"_"," ");
+    auto region = SiStripMiscalibrate::getRegionFromString(part);
+   
+    h_StoN_region[region]     = fs->make<TH1F>(Form("clusterStoN_%s",part.c_str()),Form("cluster Raw S/N (%s); %s cluster raw S/N;# clusters",append.c_str(),append.c_str()),100,0.,100.);
+    h_Noise_region[region]    = fs->make<TH1F>(Form("clusterNoise_%s",part.c_str()),Form("cluster Noise (%s); %s cluster Noise [ADC counts];# clusters",append.c_str(),append.c_str()),100,0.,10.);
+    h_StoNCorr_region[region] = fs->make<TH1F>(Form("clusterStoNCorr_%s",part.c_str()),Form("cluster S/N (%s) corrected for path length;%s cluster S/N;# clusters",append.c_str(),append.c_str()),100,0.,100.);
+    h_CCOverP_region[region]  = fs->make<TH1F>(Form("clusterChargeOverPath_%s",part.c_str()),Form("cluster charge over path (%s);%s cluster charge / path;# clusters",append.c_str(),append.c_str()),150,0.,1500.);
+    h_ClusterWidth_region[region] = fs->make<TH1F>(Form("clusterWidth_%s",part.c_str()),Form("cluster width (%s);%s cluster witdh;# clusters",append.c_str(),append.c_str()),20,-0.5,19.5);
+    h_SeedCharge_region[region]   = fs->make<TH1I>(Form("seedCharge_%s",part.c_str()),Form("cluster seed charge (%s);%s cluster seed charge [ADC counts]",append.c_str(),append.c_str()),256,0,256);
+    h_SingleStripCharge_region[region] = fs->make<TH1I>(Form("signleStripCharge_%s",part.c_str()),Form("single strip charge (%s);%s single strip charge [ADC counts]",append.c_str(),append.c_str()),256,0,256);
+  
+  }
+
+  // for ( int fooInt = SiStripHelper::TIBL1; fooInt != SiStripHelper::NUM_OF_TYPES; fooInt++ ){
+  //   SiStripHelper::layer layer = static_cast<SiStripHelper::layer>(fooInt);
+  //   std::string s_layer = getStringFromEnum(layer);
+  //   std::string append = myreplace(s_layer," ","_");
+
+  //   h_StoN_layer[layer]     = fs->make<TH1F>(Form("clusterStoN_%s",append.c_str()),Form("cluster Raw S/N (%s); %s cluster raw S/N;# clusters",s_layer.c_str(),s_layer.c_str()),100,0.,100.);
+
+  //   h_Noise_layer[layer]    = fs->make<TH1F>(Form("clusterNoise_%s",append.c_str()),Form("cluster Noise (%s); %s cluster Noise [ADC counts];# clusters",s_layer.c_str(),s_layer.c_str()),100,0.,10.);
+  //   h_StoNCorr_layer[layer] = fs->make<TH1F>(Form("clusterStoNCorr_%s",append.c_str()),Form("cluster S/N (%s) corrected for path length;%s cluster S/N;# clusters",s_layer.c_str(),s_layer.c_str()),100,0.,100.);
+  //   h_CCOverP_layer[layer]  = fs->make<TH1F>(Form("clusterChargeOverPath_%s",append.c_str()),Form("cluster charge over path (%s);%s cluster charge / path;# clusters",s_layer.c_str(),s_layer.c_str()),100,0.,1000.);
+
+  //   h_ClusterWidth_layer[layer] = fs->make<TH1F>(Form("clusterWidth_%s",append.c_str()),Form("cluster width (%s);%s cluster witdh;# clusters",s_layer.c_str(),s_layer.c_str()),20,-0.5,19.5);
+
+  // }  
+
+  h_nClusters       = fs->make<TH1F>("nStripClusters","n. of Strip clusters;n. Strip clusters; events",250,0.,5000.);
+  h_nUsedClusters   = fs->make<TH1F>("nUsedStripClusters","n. of selected Strip clusters;n. selected Strip clusters; events",200,0.,2000.);
 
   p_nClust_per_bx  = fs->make<TProfile>("nStripClustersVsBx","n. of Strip clusters vs bx;bx id;#LT n.clusters/event #GT",3500,-0.5,3495.);     
   p_nClust_per_LS  = fs->make<TProfile>("nStripClustersVsLS","n. of Strip clusters vs LS;LS; #LT n.clusters/event #GT",2500,0,2500);    
@@ -574,23 +745,121 @@ SiStripAnalyzer::beginJob()
   p_nUsedClust_per_LS  = fs->make<TProfile>("nUsesStripClustersVsLS","n. of used Strip clusters vs LS;LS; #LT n.clusters/event #GT",2500,0,2500);    			    
   p_nUsedClust_vs_lumi = fs->make<TProfile>("nUsedStripClustersVsLumi","n. of used Strip clusters vs inst. lumi;scal inst lumi E30 [Hz cm^{-2}]; #LT n.clusters/event #GT",100,0.,15000.);   
 
+    TFileDirectory tfd = fs->mkdir("trackControl");
+
+  vTrackHistos_.push_back(tfd.make<TH1F>("h_tracketa",
+					 "Track #eta;#eta_{Track};Number of Tracks",
+					 90,-3.,3.));
+
+  vTrackHistos_.push_back(tfd.make<TH1F>("h_tracketaerr",
+					 "Track #eta error;err(#eta); Number of Tracks",
+					 100,0.,0.1));
+
+  vTrackHistos_.push_back(tfd.make<TH1F>("h_trackphi",
+					 "Track #phi;#phi_{Track};Number of Tracks",
+					 90,-3.15,3.15));
+  
+  vTrackHistos_.push_back(tfd.make<TH1F>("h_trackphierr",
+					 "Track #phi error;err(#phi) [rad]; Number of Tracks",
+					 100,0.,0.1));
+  
+  vTrackHistos_.push_back(tfd.make<TH1F>("h_trackNumberOfValidHits",
+					 "Track # of valid hits;# of valid hits _{Track};Number of Tracks",
+					 40,0.,40.));
+
+  vTrackHistos_.push_back(tfd.make<TH1F>("h_trackNumberOfLostHits",
+					 "Track # of lost hits;# of lost hits _{Track};Number of Tracks",
+					 10,0.,10.));
+  
+  vTrackHistos_.push_back(tfd.make<TH1F>("h_curvature",
+					 "Curvature #kappa;#kappa_{Track} [GeV^{-1}];Number of Tracks",
+					 100,-0.5,0.5));
+
+  vTrackHistos_.push_back(tfd.make<TH1F>("h_curvatureerr",
+					 "Track Curvature error;err(#kappa) [GeV^{-1}]",
+					 100,0.,0.1));
+
+  vTrackHistos_.push_back(tfd.make<TH1F>("h_chi2",
+					 "#chi^{2};#chi^{2}_{Track};Number of Tracks",
+					 500,-0.01,500.));
+
+  vTrackHistos_.push_back(tfd.make<TH1F>("h_normchi2",
+					 "#chi^{2}/ndof;#chi^{2}/ndof;Number of Tracks",
+					 100,-0.01,10.));     
+
+  vTrackHistos_.push_back(tfd.make<TH1F>("h_pt",
+					 "p_{T}^{track};p_{T}^{track} [GeV];Number of Tracks",
+					 250,0.,250));           
+
+  vTrackHistos_.push_back(tfd.make<TH1F>("h_ptResolution",
+					 "#delta_{p_{T}}/p_{T}^{track};#delta_{p_{T}}/p_{T}^{track};Number of Tracks",
+					 100,0.,0.5)); 
+
+  vTrackHistos_.push_back(tfd.make<TH1F>("h_trackndof",
+					 "track # of DOF;track n. DOF;Number of Tracks",
+					 30,0.5,30.5)); 
+  
+  vTrackHistos_.push_back(tfd.make<TH1F>("h_trackcharge",
+					 "track charge;track charge;Number of Tracks",
+					 3,-1.5,1.5));
+  
+  vTrackHistos_.push_back(tfd.make<TH1F>("h_tracktheta",
+					 "track #theta;track #theta angle;Number of Tracks",
+					 100,0.,-3.15));
+
+  vTrackHistos_.push_back(tfd.make<TH1F>("h_trackthetaerr",
+					 "track #theta error;err(#theta) [rad]; Number of Tracks",
+					 100,0.,0.1));
+     
+  vTrackHistos_.push_back(tfd.make<TH1F>("h_trackdxy",
+					 "Transverse Impact Parameter;d_{xy} [cm]; Number of Tracks",
+					 200,-1.,1.));
+  
+  vTrackHistos_.push_back(tfd.make<TH1F>("h_trackdz",
+					 "Longitudinal Impact Parameter;d_{z} [cm]; Number of Tracks",
+					 200,-30.,30.));
+
+  vTrackHistos_.push_back(tfd.make<TH1F>("h_trackvx",
+					 "track x-coordinate reference point;track v_{x} [cm]; Number of Tracks",
+					 200,-1.,1.));
+  
+  vTrackHistos_.push_back(tfd.make<TH1F>("h_trackvy",
+					 "track y-coordinate reference point;track v_{y} [cm]; Number of Tracks",
+					 200,-1.,1.));
+
+  vTrackHistos_.push_back(tfd.make<TH1F>("h_trackvz",
+					 "track z-coordinate reference point;track v_{z} [cm]; Number of Tracks",
+					 200,-10.,10.));
+
+  vTrackHistos_.push_back(tfd.make<TH1F>("h_trackdxyerr",
+					 "Transverse Impact Parameter error;err(d_{xy}) [cm]; Number of Tracks",
+					 100,0.,0.2));
+  
+  vTrackHistos_.push_back(tfd.make<TH1F>("h_trackdzerr",
+					 "Longitudinal Impact Parameter error;err(d_{z}) [cm]; Number of Tracks",
+					 100,0.,2.));
+  
+  vTrackHistos_.push_back(tfd.make<TH1F>("h_trackalgo",
+					 "tracking algorithm;tracking algorithm; Number of Tracks",
+					 15,-0.5,14.5));
+
 }
 
 // ------------ method called once each job just after ending the event loop  ------------
 void 
-SiStripAnalyzer::endJob() 
+SiStripClusterAnalyzer::endJob() 
 {
   std::cout<<"bx:"<<maxBx<<" ls:"<<maxLS<<" instLumi:"<<maxLumi<<" PU:"<<maxPU<<std::endl;
 
-  for ( int fooInt = SiStripHelper::TIBL1; fooInt != SiStripHelper::NUM_OF_TYPES; fooInt++ ){
-    SiStripHelper::layer layer = static_cast<SiStripHelper::layer>(fooInt);
-    fitStoN( h_StoNCorr_layer[layer]);
-  }
+  // for ( int fooInt = SiStripHelper::TIBL1; fooInt != SiStripHelper::NUM_OF_TYPES; fooInt++ ){
+  //   SiStripHelper::layer layer = static_cast<SiStripHelper::layer>(fooInt);
+  //   fitStoN( h_StoNCorr_layer[layer]);
+  // }
 }
 
 // ------------ method to get the detector thickness ------------
 //****************************************************************/
-double SiStripAnalyzer::thickness(DetId id)
+double SiStripClusterAnalyzer::thickness(DetId id)
 //****************************************************************/
 {
   std::map<DetId,double>::iterator th=m_thicknessMap.find(id);
@@ -616,7 +885,7 @@ double SiStripAnalyzer::thickness(DetId id)
 }
 
 //****************************************************************/
-bool SiStripAnalyzer::IsFarFromBorder(TrajectoryStateOnSurface* trajState, const uint32_t detid, const edm::EventSetup* iSetup)
+bool SiStripClusterAnalyzer::IsFarFromBorder(TrajectoryStateOnSurface* trajState, const uint32_t detid, const edm::EventSetup* iSetup)
 //****************************************************************/
 { 
   edm::ESHandle<TrackerGeometry> tkGeom; iSetup->get<TrackerDigiGeometryRecord>().get( tkGeom );
@@ -651,7 +920,7 @@ bool SiStripAnalyzer::IsFarFromBorder(TrajectoryStateOnSurface* trajState, const
 }
 
 //****************************************************************/
-int SiStripAnalyzer::checkLayer( unsigned int iidd, const TrackerTopology* tTopo) 
+int SiStripClusterAnalyzer::checkLayer( unsigned int iidd, const TrackerTopology* tTopo) 
 //****************************************************************/
 {
   StripSubdetector strip=StripSubdetector(iidd);
@@ -675,10 +944,23 @@ int SiStripAnalyzer::checkLayer( unsigned int iidd, const TrackerTopology* tTopo
   return 0;
 }
 
+//****************************************************************/
+template <class OBJECT_TYPE>  
+int SiStripClusterAnalyzer::GetIndex(const std::vector<OBJECT_TYPE*> &vec, const TString &name)
+//****************************************************************/
+{
+  int result = 0;
+  for (typename std::vector<OBJECT_TYPE*>::const_iterator iter = vec.begin(), iterEnd = vec.end();
+       iter != iterEnd; ++iter, ++result) {
+    if (*iter && (*iter)->GetName() == name) return result;
+  }
+  edm::LogError("SiStripGainsValidator") << "@SUB=SiStripGainsValidator::GetIndex" << " could not find " << name;
+  return -1;
+}
 
 // -------------- method to get the topology from the detID ------------------------------
 //****************************************************************/
-std::string SiStripAnalyzer::getStringFromEnum(SiStripHelper::layer e)
+std::string SiStripClusterAnalyzer::getStringFromEnum(SiStripHelper::layer e)
 //****************************************************************/
 {
   switch(e)
@@ -712,7 +994,7 @@ std::string SiStripAnalyzer::getStringFromEnum(SiStripHelper::layer e)
 }
 
 //****************************************************************/
-std::string SiStripAnalyzer::myreplace(const std::string &s,const std::string &toReplace,const std::string &replaceWith)
+std::string SiStripClusterAnalyzer::myreplace(const std::string &s,const std::string &toReplace,const std::string &replaceWith)
 //****************************************************************/
 {
   std::string replacement=s;
@@ -720,17 +1002,17 @@ std::string SiStripAnalyzer::myreplace(const std::string &s,const std::string &t
 }
 
 //****************************************************************/
-Double_t SiStripAnalyzer::function_sum(Double_t *x, Double_t *par) 
+Double_t SiStripClusterAnalyzer::function_sum(Double_t *x, Double_t *par) 
 //****************************************************************/
 {
     const Double_t xx =x[0];
-    return (1 - par[0]) * f2->Eval(xx) / par[1] + (par[0]) * f3->Eval(xx) / par[2];
+    return (1 - par[0]) * SiStripHelper::f2->Eval(xx) / par[1] + (par[0]) * SiStripHelper::f3->Eval(xx) / par[2];
     //return (par[0]) * f2->Eval(xx) + (1 - par[0]) * f3->Eval(xx);
 }
 
 
 //****************************************************************/
-void SiStripAnalyzer::fitStoN(TH1F *hist)
+void SiStripClusterAnalyzer::fitStoN(TH1F *hist)
 //****************************************************************/
 {
   std::cout << "## Fitting TH1 histograms ##" << std::endl;
@@ -838,7 +1120,7 @@ void SiStripAnalyzer::fitStoN(TH1F *hist)
 }
 
 /*--------------------------------------------------------------------*/
-void SiStripAnalyzer::makeNicePlotStyle(RooPlot* plot)
+void SiStripClusterAnalyzer::makeNicePlotStyle(RooPlot* plot)
 /*--------------------------------------------------------------------*/
 { 
   plot->GetXaxis()->CenterTitle(true);
@@ -858,7 +1140,7 @@ void SiStripAnalyzer::makeNicePlotStyle(RooPlot* plot)
 
 // ------------ method fills 'descriptions' with the allowed parameters for the module  ------------
 void
-SiStripAnalyzer::fillDescriptions(edm::ConfigurationDescriptions& descriptions) {
+SiStripClusterAnalyzer::fillDescriptions(edm::ConfigurationDescriptions& descriptions) {
   //The following says we do not know what parameters are allowed so do no validation
   // Please change this to state exactly what you do use, even if it is no parameters
   edm::ParameterSetDescription desc;
@@ -867,4 +1149,4 @@ SiStripAnalyzer::fillDescriptions(edm::ConfigurationDescriptions& descriptions) 
 }
 
 //define this as a plug-in
-DEFINE_FWK_MODULE(SiStripAnalyzer);
+DEFINE_FWK_MODULE(SiStripClusterAnalyzer);
