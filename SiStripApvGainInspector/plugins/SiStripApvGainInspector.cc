@@ -90,6 +90,9 @@ class SiStripApvGainInspector : public edm::one::EDAnalyzer<edm::one::SharedReso
       void checkAndRetrieveTopology(const edm::EventSetup& setup);
       bool isGoodLandauFit(double* FitResults);
       void getPeakOfLandau(TH1* InputHisto, double* FitResults, double LowRange=50, double HighRange=5400);
+      void getPeakOfLanGau(TH1* InputHisto, double* FitResults, double LowRange=50, double HighRange=5400);
+      void getPeakOfLandauAroundMax(TH1* InputHisto, double* FitResults, double LowRange=100, double HighRange=100);
+      static double langaufun(Double_t *x, Double_t *par);
       void storeOnTree(TFileService* tfs);
       void makeNicePlotStyle(TH1F* plot);
 
@@ -269,7 +272,9 @@ SiStripApvGainInspector::analyze(const edm::Event& iEvent, const edm::EventSetup
     Proj = (TH1F*)(Charge_Vs_Index->ProjectionY("",Charge_Vs_Index->GetXaxis()->FindBin(APV->Index),Charge_Vs_Index->GetXaxis()->FindBin(APV->Index),"e"));
     if(!Proj)continue;
 
-    getPeakOfLandau(Proj,FitResults);
+    //getPeakOfLandau(Proj,FitResults);
+    //getPeakOfLanGau(Proj,FitResults);
+    getPeakOfLandauAroundMax(Proj,FitResults);
     APV->FitMPV      = FitResults[0];
     APV->FitMPVErr   = FitResults[1];
     APV->FitWidth    = FitResults[2];
@@ -592,6 +597,150 @@ SiStripApvGainInspector::getPeakOfLandau(TH1* InputHisto, double* FitResults, do
   FitResults[4]         = MyLandau.GetChisquare() / MyLandau.GetNDF();  //Fit Chi2/NDF
   FitResults[5]         = MyLandau.GetParameter(0);
   
+}
+
+
+//********************************************************************************//
+double 
+SiStripApvGainInspector::langaufun(Double_t *x, Double_t *par) 
+//********************************************************************************//
+{
+
+  //Fit parameters:
+  //par[0]=Width (scale) parameter of Landau density
+  //par[1]=Most Probable (MP, location) parameter of Landau density
+  //par[2]=Total area (integral -inf to inf, normalization constant)
+  //par[3]=Width (sigma) of convoluted Gaussian function
+  //
+  //In the Landau distribution (represented by the CERNLIB approximation),
+  //the maximum is located at x=-0.22278298 with the location parameter=0.
+  //This shift is corrected within this function, so that the actual
+  //maximum is identical to the MP parameter.
+
+  // Numeric constants
+  Double_t invsq2pi = 0.3989422804014;   // (2 pi)^(-1/2)
+  Double_t mpshift  = -0.22278298;       // Landau maximum location
+  
+  // Control constants
+  Double_t np = 100.0;      // number of convolution steps
+  Double_t sc =   5.0;      // convolution extends to +-sc Gaussian sigmas
+  
+  // Variables
+  Double_t xx;
+  Double_t mpc;
+  Double_t fland;
+  Double_t sum = 0.0;
+  Double_t xlow,xupp;
+  Double_t step;
+  Double_t i;
+  
+
+  // MP shift correction
+  mpc = par[1] - mpshift * par[0];
+  
+  // Range of convolution integral
+  xlow = x[0] - sc * par[3];
+  xupp = x[0] + sc * par[3];
+  
+  step = (xupp-xlow) / np;
+  
+  // Convolution integral of Landau and Gaussian by sum
+  for(i=1.0; i<=np/2; i++) {
+    xx = xlow + (i-.5) * step;
+    fland = TMath::Landau(xx,mpc,par[0]) / par[0];
+    sum += fland * TMath::Gaus(x[0],xx,par[3]);
+    
+    xx = xupp - (i-.5) * step;
+    fland = TMath::Landau(xx,mpc,par[0]) / par[0];
+    sum += fland * TMath::Gaus(x[0],xx,par[3]);
+  }
+
+  return (par[2] * step * sum * invsq2pi / par[3]);
+ 
+}
+   
+//********************************************************************************//
+void 
+SiStripApvGainInspector::getPeakOfLanGau(TH1* InputHisto, double* FitResults, double LowRange, double HighRange)
+{ 
+  FitResults[0]         = -0.5;  //MPV
+  FitResults[1]         =  0;    //MPV error
+  FitResults[2]         = -0.5;  //Width
+  FitResults[3]         =  0;    //Width error
+  FitResults[4]         = -0.5;  //Fit Chi2/NDF
+  FitResults[5]         = 0;     //Normalization
+  
+  if( InputHisto->GetEntries() < minNrEntries)return;
+  
+  // perform fit with standard landau
+  TF1 MyLandau("MyLandau","landau",LowRange, HighRange);
+  MyLandau.SetParameter(1,300);
+  InputHisto->Fit(&MyLandau,"QR WW");
+
+  double startvalues[4] = {100,300,10000,100}; 
+  double parlimitslo[4] = {0,250,10,0};
+  double parlimitshi[4] = {200,350,1000000,200};
+
+  TF1 MyLangau("MyLanGau",langaufun,LowRange,HighRange,4);
+  
+  MyLangau.SetParameters(startvalues);
+  MyLangau.SetParNames("Width","MP","Area","GSigma");
+
+  for (unsigned int i=0; i<4; i++) {
+    MyLangau.SetParLimits(i, parlimitslo[i], parlimitshi[i]);
+  }
+  
+  InputHisto->Fit("MyLanGau","QRB0");   // fit within specified range, use ParLimits, do not plot
+
+  // MPV is parameter 1 (0=constant, 1=MPV, 2=Sigma)
+  FitResults[0]         = MyLangau.GetParameter(1);  //MPV
+  FitResults[1]         = MyLangau.GetParError(1);   //MPV error
+  FitResults[2]         = MyLangau.GetParameter(0);  //Width
+  FitResults[3]         = MyLangau.GetParError(0);   //Width error
+  FitResults[4]         = MyLangau.GetChisquare() / MyLangau.GetNDF();  //Fit Chi2/NDF
+  FitResults[5]         = MyLangau.GetParameter(3);
+  
+}
+
+//********************************************************************************//
+void 
+SiStripApvGainInspector::getPeakOfLandauAroundMax(TH1* InputHisto, double* FitResults, double LowRange, double HighRange)
+{
+
+  FitResults[0]         = -0.5;  //MPV
+  FitResults[1]         =  0;    //MPV error
+  FitResults[2]         = -0.5;  //Width
+  FitResults[3]         =  0;    //Width error
+  FitResults[4]         = -0.5;  //Fit Chi2/NDF
+  FitResults[5]         = 0;     //Normalization
+  
+  int maxbin  = InputHisto->GetMaximumBin();
+  int maxbin2 = -9999.;
+
+  if ( InputHisto->GetBinContent(maxbin-1) > InputHisto->GetBinContent(maxbin+1)){
+    maxbin2=maxbin-1;
+  } else {
+    maxbin2=maxbin+1;
+  }
+
+  float maxbincenter = (InputHisto->GetBinCenter(maxbin) + InputHisto->GetBinCenter(maxbin2))/2;
+
+  TF1 MyLandau("MyLandau","[2]*TMath::Landau(x,[0],[1],0)",maxbincenter-LowRange,maxbincenter+HighRange);
+  MyLandau.SetParameter(0,maxbincenter);
+  MyLandau.SetParameter(1,maxbincenter/10.);
+  MyLandau.SetParameter(2,InputHisto->GetMaximum());
+  InputHisto->Fit(&MyLandau,"QOR","",maxbincenter-LowRange,maxbincenter+HighRange);
+  InputHisto->Fit(&MyLandau,"QOR","",maxbincenter-LowRange,maxbincenter+HighRange);
+  InputHisto->Fit(&MyLandau,"QOR","",maxbincenter-LowRange,maxbincenter+HighRange);
+
+  // MPV is parameter 1 (0=constant, 1=MPV, 2=Sigma)
+  FitResults[0]         = MyLandau.GetParameter(0);  //MPV
+  FitResults[1]         = MyLandau.GetParError(0);   //MPV error
+  FitResults[2]         = MyLandau.GetParameter(1);  //Width
+  FitResults[3]         = MyLandau.GetParError(1);   //Width error
+  FitResults[4]         = MyLandau.GetChisquare() / MyLandau.GetNDF();  //Fit Chi2/NDF
+  FitResults[5]         = MyLandau.GetParameter(2);
+
 }
 
 //********************************************************************************//
