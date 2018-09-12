@@ -45,12 +45,15 @@ void multi_loopAndPlot(TString namesandlabels)
     }    
   }
   
+  TCanvas dummyC("dummyC","dummyC",2000,800);
+  dummyC.Print("combined.pdf[");
+
   recurseOverKeys(sourceFiles[0],labels);
 
   for(const auto &file : sourceFiles){
     file->Close();
   } 
-
+  dummyC.Print("combined.pdf]");
 }
 
 
@@ -210,6 +213,8 @@ void plotHistograms(std::vector<TH1*> histos, const std::vector<TString>& labels
   //c1->Update();
   
   c1->SaveAs(TString(histos[0]->GetName())+".png");
+  c1->Print("combined.pdf");
+
   delete c1;
 }
 
