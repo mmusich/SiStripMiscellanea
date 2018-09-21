@@ -71,7 +71,7 @@ def main():
     print "run start time:",start,"(",bestRunStartTime,")"
     print "run stop time: ",stop,"(",bestRunStopTime,")"
     
-    command='cmsRun mergeBadChannel_Template_cfg.py globalTag='+options.inputGT+' runNumber='+str(options.inputRun)+' dqmFile='+options.inputDQMFile+' runStartTime='+str(bestRunStartTime)
+    command='cmsRun mergeBadChannel_Template_cfg.py globalTag='+options.inputGT+' runNumber='+str(options.inputRun)+' dqmFile='+options.inputDQMFile+' runStartTime='+str(bestRunStopTime)
     
     execme(command)
 
