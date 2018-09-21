@@ -504,7 +504,7 @@ SiStripGainsValidator::analyze(const edm::Event& iEvent, const edm::EventSetup& 
 	  }
 	  
 	  h_chargeFromStrips->Fill(Charge);
-	  h_diffChargeMethod->Fill(std::abs(Charge-charge));
+	  //h_diffChargeMethod->Fill(Charge-charge));
 
 	  // Fill monitoring histograms
 	  int mCharge1 = 0;
