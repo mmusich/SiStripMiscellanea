@@ -49,6 +49,7 @@
 #include "FWCore/ServiceRegistry/interface/Service.h"
 #include "CommonTools/UtilAlgos/interface/TFileService.h"
 #include "CondTools/SiStrip/plugins/SiStripMiscalibrateHelper.cc"
+#include "CondCore/DBOutputService/interface/PoolDBOutputService.h"
 
 //
 // class declaration
@@ -95,6 +96,7 @@ class SiStripApvGainInspector : public edm::one::EDAnalyzer<edm::one::SharedReso
       static double langaufun(Double_t *x, Double_t *par);
       void storeOnTree(TFileService* tfs);
       void makeNicePlotStyle(TH1F* plot);
+      std::unique_ptr<SiStripApvGain> getNewObject(); 
 
       // ----------member data ---------------------------
 
@@ -130,6 +132,9 @@ class SiStripApvGainInspector : public edm::one::EDAnalyzer<edm::one::SharedReso
       std::unique_ptr<TrackerMap> mpv_err_map;
       std::unique_ptr<TrackerMap> entries_map;
       std::unique_ptr<TrackerMap> fitChi2_map;
+
+      
+
 };
 
 //
@@ -714,6 +719,8 @@ SiStripApvGainInspector::getPeakOfLandauAroundMax(TH1* InputHisto, double* FitRe
   FitResults[4]         = -0.5;  //Fit Chi2/NDF
   FitResults[5]         = 0;     //Normalization
   
+  if( InputHisto->GetEntries() < minNrEntries)return;
+
   int maxbin  = InputHisto->GetMaximumBin();
   int maxbin2 = -9999.;
 
@@ -725,21 +732,31 @@ SiStripApvGainInspector::getPeakOfLandauAroundMax(TH1* InputHisto, double* FitRe
 
   float maxbincenter = (InputHisto->GetBinCenter(maxbin) + InputHisto->GetBinCenter(maxbin2))/2;
 
-  TF1 MyLandau("MyLandau","[2]*TMath::Landau(x,[0],[1],0)",maxbincenter-LowRange,maxbincenter+HighRange);
-  MyLandau.SetParameter(0,maxbincenter);
-  MyLandau.SetParameter(1,maxbincenter/10.);
-  MyLandau.SetParameter(2,InputHisto->GetMaximum());
-  InputHisto->Fit(&MyLandau,"QOR","",maxbincenter-LowRange,maxbincenter+HighRange);
-  InputHisto->Fit(&MyLandau,"QOR","",maxbincenter-LowRange,maxbincenter+HighRange);
-  InputHisto->Fit(&MyLandau,"QOR","",maxbincenter-LowRange,maxbincenter+HighRange);
+  //TF1 MyLandau("MyLandau","[2]*TMath::Landau(x,[0],[1],0)",maxbincenter-LowRange,maxbincenter+HighRange);
+  TF1 MyLandau("MyLandau","landau",LowRange,HighRange);
+  MyLandau.SetParameter(1,300);
+  InputHisto->Fit(&MyLandau,"QR WW");
+
+  //MyLandau.SetParameter(0,maxbincenter);
+  //MyLandau.SetParameter(1,maxbincenter/10.);
+  //MyLandau.SetParameter(2,InputHisto->GetMaximum());
+  
+  float mpv = MyLandau.GetParameter(1);
+  MyLandau.SetParameter(1,mpv);
+  //InputHisto->Rebin(3);
+  InputHisto->Fit(&MyLandau,"QOR","",mpv-50,mpv+100);
+
+  // InputHisto->Fit(&MyLandau,"QOR","",maxbincenter-LowRange,maxbincenter+HighRange);
+  // InputHisto->Fit(&MyLandau,"QOR","",maxbincenter-LowRange,maxbincenter+HighRange);
 
   // MPV is parameter 1 (0=constant, 1=MPV, 2=Sigma)
-  FitResults[0]         = MyLandau.GetParameter(0);  //MPV
-  FitResults[1]         = MyLandau.GetParError(0);   //MPV error
-  FitResults[2]         = MyLandau.GetParameter(1);  //Width
-  FitResults[3]         = MyLandau.GetParError(1);   //Width error
+  FitResults[0]         = MyLandau.GetParameter(1);  //MPV
+  FitResults[1]         = MyLandau.GetParError(1);   //MPV error
+  FitResults[2]         = MyLandau.GetParameter(2);  //Width
+  FitResults[3]         = MyLandau.GetParError(2);   //Width error
   FitResults[4]         = MyLandau.GetChisquare() / MyLandau.GetNDF();  //Fit Chi2/NDF
-  FitResults[5]         = MyLandau.GetParameter(2);
+  FitResults[5]         = MyLandau.GetParameter(0);
+
 
 }
 
@@ -769,6 +786,44 @@ void SiStripApvGainInspector::makeNicePlotStyle(TH1F* plot)
   plot->GetYaxis()->SetLabelSize(.05);
   plot->GetXaxis()->SetLabelSize(.05);
 }
+
+//********************************************************************************//
+std::unique_ptr<SiStripApvGain>
+SiStripApvGainInspector::getNewObject() 
+{
+  std::unique_ptr<SiStripApvGain> obj = std::unique_ptr<SiStripApvGain>(new SiStripApvGain());
+    
+  std::vector<float> theSiStripVector;
+  unsigned int PreviousDetId = 0; 
+  for(unsigned int a=0;a<APVsCollOrdered.size();a++){
+    std::shared_ptr<stAPVGain> APV = APVsCollOrdered[a];
+    if(APV==nullptr){ printf("Bug\n"); continue; }
+    if(APV->SubDet<=2)continue;
+    if(APV->DetId != PreviousDetId){
+      if(!theSiStripVector.empty()){
+	SiStripApvGain::Range range(theSiStripVector.begin(),theSiStripVector.end());
+	if ( !obj->put(PreviousDetId,range) )  printf("Bug to put detId = %i\n",PreviousDetId);
+      }
+      theSiStripVector.clear();
+      PreviousDetId = APV->DetId;
+    }
+    theSiStripVector.push_back(APV->Gain);
+    
+    LogDebug("SiStripGainsPCLHarvester")<<" DetId: "<<APV->DetId 
+					<<" APV:   "<<APV->APVId
+					<<" Gain:  "<<APV->Gain
+					<<std::endl;
+
+  }
+  if(!theSiStripVector.empty()){
+    SiStripApvGain::Range range(theSiStripVector.begin(),theSiStripVector.end());
+    if ( !obj->put(PreviousDetId,range) )  printf("Bug to put detId = %i\n",PreviousDetId);
+  }
+  
+  return obj;
+}
+
+
 
 
 // ------------ method called once each job just before starting event loop  ------------
@@ -836,6 +891,16 @@ SiStripApvGainInspector::endJob()
   fitChi2_map->save(true,0.,0.,"fitChi2_map.pdf");
   fitChi2_map->save(true,0.,0.,"fitChi2_map.png");
 
+  std::unique_ptr<SiStripApvGain> theAPVGains = this->getNewObject();
+  
+  // write out the APVGains record
+  edm::Service<cond::service::PoolDBOutputService> poolDbService;
+ 
+  if( poolDbService.isAvailable() )
+    poolDbService->writeOne(theAPVGains.get(), poolDbService->currentTime(),"SiStripApvGainRcd");
+  else
+    throw std::runtime_error("PoolDBService required.");
+  
 }
 
 // ------------ method fills 'descriptions' with the allowed parameters for the module  ------------
