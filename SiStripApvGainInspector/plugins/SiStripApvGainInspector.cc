@@ -92,11 +92,31 @@ class SiStripApvGainInspector : public edm::one::EDAnalyzer<edm::one::SharedReso
       bool isGoodLandauFit(double* FitResults);
       void getPeakOfLandau(TH1* InputHisto, double* FitResults, double LowRange=50, double HighRange=5400);
       void getPeakOfLanGau(TH1* InputHisto, double* FitResults, double LowRange=50, double HighRange=5400);
+      void doFakeFit(TH1* InputHisto, double* FitResults);
       void getPeakOfLandauAroundMax(TH1* InputHisto, double* FitResults, double LowRange=100, double HighRange=100);
       static double langaufun(Double_t *x, Double_t *par);
       void storeOnTree(TFileService* tfs);
       void makeNicePlotStyle(TH1F* plot);
       std::unique_ptr<SiStripApvGain> getNewObject(); 
+      std::map<std::string, TH1*> bookQualityMonitor(const TFileDirectory& dir);
+      void fillQualityMonitor();
+
+      void inline fill1D(std::map<std::string, TH1*>& h,const std::string& s, double x){
+	if(h.count(s)==0){
+	  edm::LogWarning("SiStripApvGainInspector") << "Trying to fill non-existing Histogram named " << s << std::endl;
+	  return;
+	}
+	h[s]->Fill(x);
+      }
+
+      void inline fill2D(std::map<std::string, TH1*>& h,const std::string& s, double x,double y){
+	if(h.count(s)==0){
+	  edm::LogWarning("SiStripApvGainInspector") << "Trying to fill non-existing Histogram named " << s << std::endl;
+	  return;
+	}
+	h[s]->Fill(x,y);
+      }
+
 
       // ----------member data ---------------------------
 
@@ -133,8 +153,7 @@ class SiStripApvGainInspector : public edm::one::EDAnalyzer<edm::one::SharedReso
       std::unique_ptr<TrackerMap> entries_map;
       std::unique_ptr<TrackerMap> fitChi2_map;
 
-      
-
+      std::map<std::string, TH1*> hControl;
 };
 
 //
@@ -280,6 +299,7 @@ SiStripApvGainInspector::analyze(const edm::Event& iEvent, const edm::EventSetup
     //getPeakOfLandau(Proj,FitResults);
     //getPeakOfLanGau(Proj,FitResults);
     getPeakOfLandauAroundMax(Proj,FitResults);
+    //doFakeFit(Proj,FitResults);
     APV->FitMPV      = FitResults[0];
     APV->FitMPVErr   = FitResults[1];
     APV->FitWidth    = FitResults[2];
@@ -604,6 +624,16 @@ SiStripApvGainInspector::getPeakOfLandau(TH1* InputHisto, double* FitResults, do
   
 }
 
+void 
+SiStripApvGainInspector::doFakeFit(TH1* InputHisto, double* FitResults){
+  FitResults[0]         = -0.5;  //MPV
+  FitResults[1]         =  0;    //MPV error
+  FitResults[2]         = -0.5;  //Width
+  FitResults[3]         =  0;    //Width error
+  FitResults[4]         = -0.5;  //Fit Chi2/NDF
+  FitResults[5]         = 0;     //Normalization
+}
+
 
 //********************************************************************************//
 double 
@@ -830,6 +860,9 @@ SiStripApvGainInspector::getNewObject()
 void
 SiStripApvGainInspector::beginJob()
 {
+  TFileDirectory control_dir = tfs->mkdir("Control");
+  //DA.cd();
+  hControl=this->bookQualityMonitor(control_dir);
 }
 
 // ------------ method called once each job just after ending the event loop  ------------
@@ -888,8 +921,10 @@ SiStripApvGainInspector::endJob()
   entries_map->save(true,0,0,"entries_map.pdf");
   entries_map->save(true,0,0,"entries_map.png");
 
-  fitChi2_map->save(true,0.,0.,"fitChi2_map.pdf");
-  fitChi2_map->save(true,0.,0.,"fitChi2_map.png");
+  //fitChi2_map->save(true,0.,0.,"fitChi2_map.pdf");
+  //fitChi2_map->save(true,0.,0.,"fitChi2_map.png");
+
+  fillQualityMonitor();
 
   std::unique_ptr<SiStripApvGain> theAPVGains = this->getNewObject();
   
@@ -902,6 +937,167 @@ SiStripApvGainInspector::endJob()
     throw std::runtime_error("PoolDBService required.");
   
 }
+
+std::map<std::string, TH1*>
+SiStripApvGainInspector::bookQualityMonitor(const TFileDirectory& dir)
+{
+
+  int   MPVbin = 300;
+  float MPVmin = 0.;
+  float MPVmax = 600.;
+
+  TH1F::SetDefaultSumw2(kTRUE);
+  std::map<std::string, TH1*> h;
+
+  h["MPV_Vs_EtaTIB"]      = dir.make <TH2F>("MPVvsEtaTIB" ,"MPV vs Eta TIB"      ,50,-3.0,3.0,MPVbin,MPVmin,MPVmax);
+  h["MPV_Vs_EtaTID"]      = dir.make <TH2F>("MPVvsEtaTID" ,"MPV vs Eta TID"      ,50,-3.0,3.0,MPVbin,MPVmin,MPVmax);
+  h["MPV_Vs_EtaTOB"]      = dir.make <TH2F>("MPVvsEtaTOB" ,"MPV vs Eta TOB"      ,50,-3.0,3.0,MPVbin,MPVmin,MPVmax);
+  h["MPV_Vs_EtaTEC"]      = dir.make <TH2F>("MPVvsEtaTEC" ,"MPV vs Eta TEC"      ,50,-3.0,3.0,MPVbin,MPVmin,MPVmax);
+  h["MPV_Vs_EtaTECthin"]  = dir.make <TH2F>("MPVvsEtaTEC1","MPV vs Eta TEC-thin" ,50,-3.0,3.0,MPVbin,MPVmin,MPVmax);
+  h["MPV_Vs_EtaTECthick"] = dir.make <TH2F>("MPVvsEtaTEC2","MPV vs Eta TEC-thick",50,-3.0,3.0,MPVbin,MPVmin,MPVmax);
+
+  h["MPV_Vs_PhiTIB"]      = dir.make <TH2F>("MPVvsPhiTIB" ,"MPV vs Phi TIB"      ,50,-3.4,3.4,MPVbin,MPVmin,MPVmax);
+  h["MPV_Vs_PhiTID"]      = dir.make <TH2F>("MPVvsPhiTID" ,"MPV vs Phi TID"      ,50,-3.4,3.4,MPVbin,MPVmin,MPVmax);
+  h["MPV_Vs_PhiTOB"]      = dir.make <TH2F>("MPVvsPhiTOB" ,"MPV vs Phi TOB"      ,50,-3.4,3.4,MPVbin,MPVmin,MPVmax);
+  h["MPV_Vs_PhiTEC"]      = dir.make <TH2F>("MPVvsPhiTEC" ,"MPV vs Phi TEC"      ,50,-3.4,3.4,MPVbin,MPVmin,MPVmax);
+  h["MPV_Vs_PhiTECthin"]  = dir.make <TH2F>("MPVvsPhiTEC1","MPV vs Phi TEC-thin ",50,-3.4,3.4,MPVbin,MPVmin,MPVmax);
+  h["MPV_Vs_PhiTECthick"] = dir.make <TH2F>("MPVvsPhiTEC2","MPV vs Phi TEC-thick",50,-3.4,3.4,MPVbin,MPVmin,MPVmax);
+
+  h["NoMPVfit"]     = dir.make <TH2F>("NoMPVfit"    ,"Modules with bad Landau Fit",350, -350, 350, 240, 0, 120);
+  h["NoMPVmasked"]  = dir.make <TH2F>("NoMPVmasked" ,"Masked Modules"             ,350, -350, 350, 240, 0, 120);
+
+  h["Gains"]        = dir.make <TH1F>("Gains"         ,"Gains"            , 300, 0, 2);
+  h["MPVs"]         = dir.make <TH1F>("MPVs"          ,"MPVs"             , MPVbin,MPVmin,MPVmax);
+  h["MPVs320"]      = dir.make <TH1F>("MPV_320"       ,"MPV 320 thickness", MPVbin,MPVmin,MPVmax);
+  h["MPVs500"]      = dir.make <TH1F>("MPV_500"       ,"MPV 500 thickness", MPVbin,MPVmin,MPVmax);
+  h["MPVsTIB"]      = dir.make <TH1F>("MPV_TIB"       ,"MPV TIB"          , MPVbin,MPVmin,MPVmax);
+  h["MPVsTID"]      = dir.make <TH1F>("MPV_TID"       ,"MPV TID"          , MPVbin,MPVmin,MPVmax);
+  h["MPVsTIDP"]     = dir.make <TH1F>("MPV_TIDP"      ,"MPV TIDP"         , MPVbin,MPVmin,MPVmax);
+  h["MPVsTIDM"]     = dir.make <TH1F>("MPV_TIDM"      ,"MPV TIDM"         , MPVbin,MPVmin,MPVmax);
+  h["MPVsTOB"]      = dir.make <TH1F>("MPV_TOB"       ,"MPV TOB"          , MPVbin,MPVmin,MPVmax);
+  h["MPVsTEC"]      = dir.make <TH1F>("MPV_TEC"       ,"MPV TEC"          , MPVbin,MPVmin,MPVmax);
+  h["MPVsTECP"]     = dir.make <TH1F>("MPV_TECP"      ,"MPV TECP"         , MPVbin,MPVmin,MPVmax);
+  h["MPVsTECM"]     = dir.make <TH1F>("MPV_TECM"      ,"MPV TECM"         , MPVbin,MPVmin,MPVmax);
+  h["MPVsTECthin"]  = dir.make <TH1F>("MPV_TEC1"      ,"MPV TEC thin"     , MPVbin,MPVmin,MPVmax);
+  h["MPVsTECthick"] = dir.make <TH1F>("MPV_TEC2"      ,"MPV TEC thick"    , MPVbin,MPVmin,MPVmax);
+  h["MPVsTECP1"]    = dir.make <TH1F>("MPV_TECP1"     ,"MPV TECP thin "   , MPVbin,MPVmin,MPVmax);
+  h["MPVsTECP2"]    = dir.make <TH1F>("MPV_TECP2"     ,"MPV TECP thick"   , MPVbin,MPVmin,MPVmax);
+  h["MPVsTECM1"]    = dir.make <TH1F>("MPV_TECM1"     ,"MPV TECM thin"    , MPVbin,MPVmin,MPVmax);
+  h["MPVsTECM2"]    = dir.make <TH1F>("MPV_TECM2"     ,"MPV TECM thick"   , MPVbin,MPVmin,MPVmax);
+
+  h["MPVError"]      = dir.make <TH1F>("MPVError"      ,"MPV Error"        ,                  150, 0, 150);
+  h["MPVErrorVsMPV"] = dir.make <TH2F>("MPVErrorVsMPV" ,"MPV Error vs MPV" , 300,    0, 600,  150, 0, 150);
+  h["MPVErrorVsEta"] = dir.make <TH2F>("MPVErrorVsEta" ,"MPV Error vs Eta" ,  50, -3.0, 3.0,  150, 0, 150);
+  h["MPVErrorVsPhi"] = dir.make <TH2F>("MPVErrorVsPhi" ,"MPV Error vs Phi" ,  50, -3.4, 3.4,  150, 0, 150);
+  h["MPVErrorVsN "]  = dir.make <TH2F>("MPVErrorVsN"   ,"MPV Error vs N"   , 500,    0, 1000, 150, 0, 150);
+
+  h["DiffWRTPrevGainTIB"] = dir.make <TH1F>("DiffWRTPrevGainTIB" ,"Diff w.r.t. PrevGain TIB" , 250, 0.5,1.5);
+  h["DiffWRTPrevGainTID"] = dir.make <TH1F>("DiffWRTPrevGainTID" ,"Diff w.r.t. PrevGain TID" , 250, 0.5,1.5);
+  h["DiffWRTPrevGainTOB"] = dir.make <TH1F>("DiffWRTPrevGainTOB" ,"Diff w.r.t. PrevGain TOB" , 250, 0.5,1.5);
+  h["DiffWRTPrevGainTEC"] = dir.make <TH1F>("DiffWRTPrevGainTEC" ,"Diff w.r.t. PrevGain TEC" , 250, 0.5,1.5);
+
+  h["GainVsPrevGainTIB"]  = dir.make <TH2F>("GainVsPrevGainTIB"  ,"Gain vs PrevGain TIB"  , 100, 0,2, 100, 0,2);
+  h["GainVsPrevGainTID"]  = dir.make <TH2F>("GainVsPrevGainTID"  ,"Gain vs PrevGain TID"  , 100, 0,2, 100, 0,2);
+  h["GainVsPrevGainTOB"]  = dir.make <TH2F>("GainVsPrevGainTOB"  ,"Gain vs PrevGain TOB"  , 100, 0,2, 100, 0,2);
+  h["GainVsPrevGainTEC"]  = dir.make <TH2F>("GainVsPrevGainTEC"  ,"Gain vs PrevGain TEC"  , 100, 0,2, 100, 0,2);
+
+  return h;
+
+}
+
+void
+SiStripApvGainInspector::fillQualityMonitor(){
+
+  for(unsigned int a=0;a<APVsCollOrdered.size();a++){
+
+    std::shared_ptr<stAPVGain> APV = APVsCollOrdered[a];
+    if(APV==nullptr)continue;
+
+    unsigned int  Index        = APV->Index;
+    unsigned int  SubDet       = APV->SubDet;
+    unsigned int  DetId        = APV->DetId;
+    float         z            = APV->z;
+    float         Eta          = APV->Eta;
+    float         R            = APV->R;
+    float         Phi          = APV->Phi;
+    float         Thickness    = APV->Thickness;
+    double        FitMPV       = APV->FitMPV;
+    double        FitMPVErr    = APV->FitMPVErr;
+    double        Gain         = APV->Gain;
+    double        NEntries     = APV->NEntries;
+    double        PreviousGain = APV->PreviousGain;
+
+    if (SubDet<3) continue;  // avoid to loop over Pixel det id
+
+    if (FitMPV<=0.) {  // No fit of MPV
+      if (APV->isMasked) fill2D(hControl,"NoMPVmasked",z,R);
+      else               fill2D(hControl,"NoMPVfit",z,R);
+    } else {          // Fit of MPV
+      if(FitMPV>0.) fill1D(hControl,"Gains",Gain);
+ 
+      fill1D(hControl,"MPVs",FitMPV);
+      if(Thickness<0.04) fill1D(hControl,"MPVs320",FitMPV);
+      if(Thickness>0.04) fill1D(hControl,"MPVs500",FitMPV);
+
+       fill1D(hControl,"MPVError",FitMPVErr);
+       fill2D(hControl,"MPVErrorVsMPV",FitMPV,FitMPVErr);
+       fill2D(hControl,"MPVErrorVsEta",Eta,FitMPVErr);
+       fill2D(hControl,"MPVErrorVsPhi",Phi,FitMPVErr);
+       fill2D(hControl,"MPVErrorVsN",NEntries,FitMPVErr);
+
+       if(SubDet==3) {
+         fill2D(hControl,"MPV_Vs_EtaTIB",Eta,FitMPV);
+         fill2D(hControl,"MPV_Vs_PhiTIB",Phi,FitMPV);
+         fill1D(hControl,"MPVsTIB",FitMPV);
+
+       } else if(SubDet==4) {
+         fill2D(hControl,"MPV_Vs_EtaTID",Eta,FitMPV);
+         fill2D(hControl,"MPV_Vs_PhiTID",Phi,FitMPV);
+         fill1D(hControl,"MPVsTID",FitMPV);
+         if(Eta<0.) fill1D(hControl,"MPVsTIDM",FitMPV);
+         if(Eta>0.) fill1D(hControl,"MPVsTIDP",FitMPV);
+
+       } else if (SubDet==5) {
+         fill2D(hControl,"MPV_Vs_EtaTOB",Eta,FitMPV);
+         fill2D(hControl,"MPV_Vs_PhiTOB",Phi,FitMPV);
+         fill1D(hControl,"MPVsTOB",FitMPV);
+
+       } else if (SubDet==6) {
+         fill2D(hControl,"MPV_Vs_EtaTEC",Eta,FitMPV);
+         fill2D(hControl,"MPV_Vs_PhiTEC",Phi,FitMPV);
+         fill1D(hControl,"MPVsTEC",FitMPV);
+         if(Eta<0.) fill1D(hControl,"MPVsTECM",FitMPV);
+         if(Eta>0.) fill1D(hControl,"MPVsTECP",FitMPV);
+         if(Thickness<0.04) {
+           fill2D(hControl,"MPV_Vs_EtaTECthin",Eta,FitMPV);
+           fill2D(hControl,"MPV_Vs_PhiTECthin",Phi,FitMPV);
+           fill1D(hControl,"MPVsTECthin",FitMPV);
+           if(Eta>0.) fill1D(hControl,"MPVsTECP1",FitMPV);
+           if(Eta<0.) fill1D(hControl,"MPVsTECM1",FitMPV);
+         }
+         if(Thickness>0.04) {
+           fill2D(hControl,"MPV_Vs_EtaTECthick",Eta,FitMPV);
+           fill2D(hControl,"MPV_Vs_PhiTECthick",Phi,FitMPV);
+           fill1D(hControl,"MPVsTECthick",FitMPV);
+           if(Eta>0.) fill1D(hControl,"MPVsTECP2",FitMPV);
+           if(Eta<0.) fill1D(hControl,"MPVsTECM2",FitMPV);
+         }
+       }
+    }
+
+    if(SubDet==3 && PreviousGain!=0. )      fill1D(hControl,"DiffWRTPrevGainTIB",Gain/PreviousGain);
+    else if(SubDet==4 && PreviousGain!=0. ) fill1D(hControl,"DiffWRTPrevGainTID",Gain/PreviousGain);
+    else if(SubDet==5 && PreviousGain!=0. ) fill1D(hControl,"DiffWRTPrevGainTOB",Gain/PreviousGain);
+    else if(SubDet==6 && PreviousGain!=0. ) fill1D(hControl,"DiffWRTPrevGainTEC",Gain/PreviousGain);
+
+    if(SubDet==3 )      fill2D(hControl,"GainVsPrevGainTIB",PreviousGain,Gain);
+    else if(SubDet==4 ) fill2D(hControl,"GainVsPrevGainTID",PreviousGain,Gain);
+    else if(SubDet==5 ) fill2D(hControl,"GainVsPrevGainTOB",PreviousGain,Gain);
+    else if(SubDet==6 ) fill2D(hControl,"GainVsPrevGainTEC",PreviousGain,Gain);
+
+  } // loop on the APV collections
+}
+
 
 // ------------ method fills 'descriptions' with the allowed parameters for the module  ------------
 void
