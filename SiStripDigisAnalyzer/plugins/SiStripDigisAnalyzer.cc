@@ -40,7 +40,7 @@
 class SiStripDigisAnalyzer : public edm::one::EDAnalyzer<edm::one::SharedResources> {
 public:
   explicit SiStripDigisAnalyzer(const edm::ParameterSet&);
-  ~SiStripDigisAnalyzer();
+  ~SiStripDigisAnalyzer() override;
 
   static void fillDescriptions(edm::ConfigurationDescriptions& descriptions);
 
@@ -57,11 +57,12 @@ private:
 //
 // constructors and destructor
 //
-SiStripDigisAnalyzer::SiStripDigisAnalyzer(const edm::ParameterSet& iConfig): 
-  edmDetSetVector_SiStripDigi_Token_(consumes<edm::DetSetVector<SiStripDigi>>(iConfig.getParameter<edm::InputTag>("src"))) {
-    tmap = std::make_unique<TrackerMap>("Strip");
-    tmap->setTitle("Strip digis entries");
-    tmap->setPalette(1);
+SiStripDigisAnalyzer::SiStripDigisAnalyzer(const edm::ParameterSet& iConfig)
+    : edmDetSetVector_SiStripDigi_Token_(
+          consumes<edm::DetSetVector<SiStripDigi>>(iConfig.getParameter<edm::InputTag>("src"))) {
+  tmap = std::make_unique<TrackerMap>("Strip");
+  tmap->setTitle("Strip digis entries");
+  tmap->setPalette(1);
 }
 
 SiStripDigisAnalyzer::~SiStripDigisAnalyzer() {}
@@ -98,7 +99,7 @@ void SiStripDigisAnalyzer::fillDescriptions(edm::ConfigurationDescriptions& desc
   //The following says we do not know what parameters are allowed so do no validation
   // Please change this to state exactly what you do use, even if it is no parameters
   edm::ParameterSetDescription desc;
-  desc.add<edm::InputTag>("src",edm::InputTag("simSiStripDigis","ZeroSuppressed"));
+  desc.add<edm::InputTag>("src", edm::InputTag("simSiStripDigis", "ZeroSuppressed"));
   descriptions.addWithDefaultLabel(desc);
 }
 

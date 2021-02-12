@@ -157,33 +157,33 @@ SiStripApvGainInspector::SiStripApvGainInspector(const edm::ParameterSet& iConfi
   fin = TFile::Open(filename_.c_str(), "READ");
   Charge_Vs_Index = (TH2F*)fin->Get("DQMData/Run 999999/AlCaReco/Run summary/SiStripGainsAAG/Charge_Vs_Index_AagBunch");
 
-  ratio_map = std::unique_ptr<TrackerMap>(new TrackerMap("ratio"));
+  ratio_map = std::make_unique<TrackerMap>("ratio");
   ratio_map->setTitle("Average by module of the G2 Gain payload ratio (new/old)");
   ratio_map->setPalette(1);
 
-  new_payload_map = std::unique_ptr<TrackerMap>(new TrackerMap("new_payload"));
+  new_payload_map = std::make_unique<TrackerMap>("new_payload");
   new_payload_map->setTitle("Tracker Map of Updated G2 Gain payload averaged by module");
   new_payload_map->setPalette(1);
 
-  old_payload_map = std::unique_ptr<TrackerMap>(new TrackerMap("old_payload"));
+  old_payload_map = std::make_unique<TrackerMap>("old_payload");
   old_payload_map->setTitle("Tracker Map of Starting G2 Gain Payload averaged by module");
   old_payload_map->setPalette(1);
 
   // fit quality maps
 
-  mpv_map = std::unique_ptr<TrackerMap>(new TrackerMap("MPV"));
+  mpv_map = std::make_unique<TrackerMap>("MPV");
   mpv_map->setTitle("Landau Fit MPV average value per module [ADC counts/mm]");
   mpv_map->setPalette(1);
 
-  mpv_err_map = std::unique_ptr<TrackerMap>(new TrackerMap("MPVerr"));
+  mpv_err_map = std::make_unique<TrackerMap>("MPVerr");
   mpv_err_map->setTitle("Landau Fit MPV average error per module [ADC counts/mm]");
   mpv_err_map->setPalette(1);
 
-  entries_map = std::unique_ptr<TrackerMap>(new TrackerMap("Entries"));
+  entries_map = std::make_unique<TrackerMap>("Entries");
   entries_map->setTitle("log_{10}(entries) average per module");
   entries_map->setPalette(1);
 
-  fitChi2_map = std::unique_ptr<TrackerMap>(new TrackerMap("FitChi2"));
+  fitChi2_map = std::make_unique<TrackerMap>("FitChi2");
   fitChi2_map->setTitle("log_{10}(Fit #chi^{2}/ndf) average per module");
   fitChi2_map->setPalette(1);
 }
