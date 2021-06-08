@@ -99,17 +99,56 @@ process.siStripQualityESProducer.ListOfRecordToMerge = cms.VPSet(
 process.siStripQualityESProducer.ReduceGranularity = cms.bool(False)
 process.siStripQualityESProducer.ThresholdForReducedGranularity = cms.double(0.3)
 
-process.load("DQMServices.Core.DQMStore_cfg")
-
-process.stat = cms.EDAnalyzer("SiStripQualityStatistics",
-    TkMapFileName = cms.untracked.string('MergedBadComponentsTkMap.png'),
+#################################################################################
+#Tool to print list of Bad modules and create Tracker Map indicating Bad modules
+#################################################################################
+process.stat = cms.EDProducer("SiStripQualityStatistics",
+    TkMapFileName = cms.untracked.string('TkMap_Sep20_2018_322625.png'),
     dataLabel = cms.untracked.string('')
 )
 #### Add these lines to produce a tracker map
-process.load("DQMServices.Core.DQMStore_cfg")
-process.TkDetMap = cms.Service("TkDetMap")
-process.SiStripDetInfoFileReader = cms.Service("SiStripDetInfoFileReader")
+process.load("DQM.SiStripCommon.TkHistoMap_cff")
+####
+
+######################################################
+# Write Information into DB, specify SQLite file name
+######################################################
+process.load("CalibTracker.SiStripESProducers.DBWriter.SiStripBadStripFromQualityDummyDBWriter_cfi")
+#process.siStripBadStripFromQualityDummyDBWriter.OpenIovAt = cms.untracked.string("currentTime")
+process.siStripBadStripFromQualityDummyDBWriter.OpenIovAt = cms.untracked.string("beginTime")
+process.PoolDBOutputService = cms.Service("PoolDBOutputService",
+    BlobStreamerName = cms.untracked.string('TBufferBlobStreamingService'),
+    DBParameters = cms.PSet(
+        authenticationPath = cms.untracked.string('/afs/cern.ch/cms/DB/conddb')
+    ),
+    timetype = cms.untracked.string('runnumber'),
+    connect = cms.string('sqlite_file:dbfile_Sep20_2018_322625.db'),
+    toPut = cms.VPSet(cms.PSet(
+        record = cms.string('SiStripBadModuleRcd'),
+        tag = cms.string('SiStripBadComponents_realisticMC_Sep20_2018_v1_mc')
+    ))
+)
+####################################
+# Process Definition
+####################################
+
+process.out = cms.OutputModule("AsciiOutputModule")
+process.siStripBadStripFromQualityDummyDBWriter.record=process.PoolDBOutputService.toPut[0].record
+process.p = cms.Path(process.stat*process.siStripBadStripFromQualityDummyDBWriter)
+
+process.ep = cms.EndPath(process.out)
 
 
-process.p = cms.Path(process.stat)
+# #################################################################################
+# #Tool to print list of Bad modules and create Tracker Map indicating Bad modules
+# #################################################################################
+# process.stat = cms.EDProducer("SiStripQualityStatistics",
+#     TkMapFileName = cms.untracked.string('TkMap_Sep20_2018_322625.png'),
+#     dataLabel = cms.untracked.string('')
+# )
+# #### Add these lines to produce a tracker map
+# process.load("DQM.SiStripCommon.TkHistoMap_cff")
+# ####
+
+# process.p = cms.Path(process.stat)
 
